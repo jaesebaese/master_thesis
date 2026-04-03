@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Sensitive config files
+graphtutorial/config.cfg
+graphtutorial/config.py
+graphtutorial/policies.json
+graphtutorial/policies_and_settings.json
+
+# Tests
+graphtutorial/test_agent.py
+graphtutorial/test.py
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
