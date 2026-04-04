@@ -22,17 +22,13 @@ def tavily_search(query: str) -> str:
     return str(response)
 
 
-
-# Using Gemini
-#from langchain_google_genai import ChatGoogleGenerativeAI
-#model = ChatGoogleGenerativeAI(model="gemini-3-pro-preview")
-
-agent = create_deep_agent(
+search_agent = create_deep_agent(
     model=model,
     tools=[tavily_search],
-    system_prompt="You are a helpful assistant. Always use the tavily_search tool for any questions about current events, news, or real-time information."
+    system_prompt="You are a helpful search assistant. Always use the tavily_search tool to research best practices, and vendor-specific information."
 )
 
-query = input("Ask the agent: ") 
-result = agent.invoke({"messages": [{"role": "user", "content": query}]})
-print(result["messages"][-1].content)
+if __name__ == "__main__":
+    query = input("Ask the search agent: ")
+    result = search_agent.invoke({"messages": [{"role": "user", "content": query}]})
+    print(result["messages"][-1].content)
