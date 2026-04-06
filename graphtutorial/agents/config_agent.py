@@ -1,5 +1,4 @@
 from langchain.chat_models import init_chat_model
-from deepagents import create_deep_agent
 from langchain.tools import tool
 
 
@@ -23,13 +22,9 @@ def analyze_configs(query: str) -> str:
 
     return configurations
 
-config_agent = create_deep_agent(
-    model=model,
-    tools=[analyze_configs],
-    system_prompt="You are a helpful security expert. To retrieve the security configurations, use the analyze_configs tool and search for specific policies."
-)
-
-if __name__ == "__main__":
-    query = input("Ask the configagent: ")
-    result = config_agent.invoke({"messages": [{"role": "user", "content": query}]})
-    print(result["messages"][-1].content)
+config_agent = {
+    "name": "config_agent",
+    "description": "Retrieves and analyzes Intune configuration policies.",
+    "system_prompt": "You are a helpful security expert. To retrieve the security configurations, use the analyze_configs tool and search for specific policies.",
+    "tools": [analyze_configs],
+}

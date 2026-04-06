@@ -21,13 +21,9 @@ def policy_analyzer(query: str) -> str:
     return str(policy_data)
 
 
-policy_agent = create_deep_agent(
-    model=model,
-    tools=[policy_analyzer],
-    system_prompt="You are a helpful policy analyzer. Always use the policy_analyzer tool to evaluate security policies."
-)
-
-if __name__ == "__main__":
-    query = input("Ask the policy agent: ")
-    result = policy_agent.invoke({"messages": [{"role": "user", "content": query}]})
-    print(result["messages"][-1].content)
+policy_agent = {
+    "name": "policy_agent",
+    "description": "Looks up CIS/Microsoft baseline policy controls.",
+    "system_prompt": "You are a helpful policy analyzer. Always use the policy_analyzer tool to evaluate security policies.",
+    "tools": [policy_analyzer],
+}

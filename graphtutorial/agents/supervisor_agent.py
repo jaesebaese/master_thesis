@@ -1,6 +1,5 @@
 from langchain.chat_models import init_chat_model
 from deepagents import create_deep_agent
-from langchain.tools import tool
 from search_agent import search_agent
 from config_agent import config_agent
 from policy_agent import policy_agent
@@ -13,11 +12,7 @@ model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature
 
 agent = create_deep_agent(
     model=model,
-    subagents=[
-        {"runnable": config_agent, "name": "config-agent", "description": "Retrieves and analyzes Intune configuration policies."},
-        {"runnable": policy_agent, "name": "policy-agent", "description": "Looks up CIS/Microsoft baseline policy controls."},
-        {"runnable": search_agent, "name": "search-agent", "description": "Searches the web for security best practices and vendor guidance."},
-    ],
+    subagents=[policy_agent, search_agent, config_agent],
     system_prompt="""You are a security supervisor orchestrating a 
     policy drift analysis. Follow these steps in order:
 
