@@ -29,6 +29,7 @@ graphtutorial/test.py
 graphtutorial/configurations/policies.json
 graphtutorial/configurations/policies_and_settings.json
 graphtutorial/configurations/policies_and_settings_shorter.json
+graphtutorial/configurations/policies_and_settings_expand.json
 graphtutorial/policies/password_policy.txt
 
 # IDE
