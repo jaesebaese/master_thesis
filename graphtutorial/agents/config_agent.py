@@ -1,5 +1,7 @@
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool
+import json
+import os
 
 
 OLLAMA_MODEL = "mistral-nemo:latest"
@@ -13,8 +15,6 @@ def analyze_configs(query: str) -> str:
     """Retrieve all security configuration policies. Returns policy names,
     descriptions, platforms and technologies so you can analyze which ones
     are relevant to the query."""
-    import json
-    import os
 
     path = os.path.join(os.path.dirname(__file__), "../configurations", "policies_and_settings_expand.json")
     with open(path, "r") as f:
@@ -34,8 +34,6 @@ def explain_policy_settings(policy_name: str) -> str:
     Args:
         policy_name: Full or partial name of the policy (case-insensitive match).
     """
-    import json
-    import os
 
     config_path = os.path.join(
         os.path.dirname(__file__), "../configurations/policies_and_settings_expand.json"

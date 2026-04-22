@@ -18,19 +18,17 @@ env/
 # Sensitive config files
 graphtutorial/config.cfg
 graphtutorial/config.py
-graphtutorial/policies.json
-graphtutorial/policies_and_settings.json
 
 # Tests
 graphtutorial/test_agent.py
 graphtutorial/test.py
 
-# Policies
-graphtutorial/configurations/policies.json
-graphtutorial/configurations/policies_and_settings.json
-graphtutorial/configurations/policies_and_settings_shorter.json
-graphtutorial/configurations/policies_and_settings_expand.json
-graphtutorial/policies/password_policy.txt
+# Configurations & Policies
+graphtutorial/configurations/
+graphtutorial/policies/
+
+#Preprocessing
+graphtutorial/preprocessing/
 
 # IDE
 .vscode/
