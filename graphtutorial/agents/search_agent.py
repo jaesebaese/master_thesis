@@ -19,17 +19,37 @@ client = TavilyClient(api_key=TAVILY_API_KEY)
 # Wrap Tavily search with decorator
 @tool
 def tavily_search(query: str) -> str:
-    """Search the web using Tavily"""
+    """Search Microsoft documentation for security best practices and Intune guidance."""
     response = client.search(
         query=query,
         max_results=3,
+        include_domains=["learn.microsoft.com/en-us/intune/"],
     )
-    print(str(response))
     return str(response)
+@tool
+def tavily_search_specific_configurations(query: str) -> str:
+    """Search Microsoft documentation for specific Intune configuration guidance."""
+    response = client.search(
+        query=query,
+        max_results=3,
+        include_domains=["learn.microsoft.com/en-us/intune/"],
+    )
+    return str(response)
+
 
 search_agent = {
     "name": "search_agent",
     "description": "Searches the web for security best practices and vendor guidance.",
-    "system_prompt": "You are a helpful search assistant. Always use the tavily_search tool to research best practices, and vendor-specific information.",
+    "system_prompt": """You are a helpful search assistant. 
+        Always use the tavily_search tool to research best practices, and vendor-specific information. 
+        It is important to only return information from trusted sources such as Microsoft documentation. 
+        Always use the tavily_search tool to perform searches, and never attempt to answer based on your own knowledge or make up sources. 
+        Search for specific settings, controls, and recommendations related to the user's query.
+        """,
     "tools": [tavily_search],
 }
+
+if __name__ == "__main__":
+    # result = tavily_search.invoke("Bitlocker policies for Windows devices")
+    result = tavily_search_specific_configurations.invoke("device_vendor_msft_bitlocker_fixeddrivesrecoveryoptions")
+    print(result)
