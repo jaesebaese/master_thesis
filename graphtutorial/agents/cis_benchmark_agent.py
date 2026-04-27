@@ -49,6 +49,18 @@ def _collect_settings(instance: dict, result: list[dict]) -> None:
             "value_type": "simpleCollection",
         })
 
+def check_compliance(tenant_value, cis_value, operator="=="):
+    try:
+        t = int(tenant_value)
+        c = int(cis_value)
+        if operator == ">=": return t >= c
+        if operator == "<=": return t <= c
+        if operator == ">":  return t > c
+        if operator == "<":  return t < c
+    except (ValueError, TypeError):
+        pass
+    return str(tenant_value) == str(cis_value)
+
 
 @tool
 def compare_to_cis_benchmark(query: str) -> str:
@@ -105,7 +117,7 @@ def compare_to_cis_benchmark(query: str) -> str:
             tenant_configurations = []
         else:
             tenant_configurations = [
-                {**hit, "compliant": str(hit["raw_value"]) == str(cis_raw)}
+                {**hit, "compliant": check_compliance(hit["raw_value"], cis_raw, item.get("operator", "=="))}
                 for hit in tenant_hits
             ]
             status = (
@@ -146,14 +158,34 @@ cis_benchmark_agent = {
         "Uses the compare_to_cis_benchmark tool to scan tenant policies for compliance with the CIS benchmark and produces a detailed report."
     ),
     "system_prompt": (
-        "You are a helpful IT security expert specialising in Microsoft Intune. "
-        "When asked to compare to the CIS benchmark:\n"
-        "1. Call compare_to_cis_benchmark with the query.\n"
-        "2. Analyze the results to identify common compliance gaps and patterns.\n"
-        "3. Provide clear, actionable recommendations for improving compliance based on the specific non-compliant settings found.\n"
-        "Always provide a reason for each recommendation.\n"
-        "Be concise but precise. Avoid jargon without explanation."
-    ),
+        "You are a Microsoft Intune configuration analyst. "
+        "Your job is to retrieve and explain what is currently configured "
+        "in the tenant — never answer from memory.\n\n"
+
+        "## Tool selection\n"
+        "- If the user asks for an OVERVIEW of all policies or wants to know "
+        "what policies exist: call analyze_configs first.\n"
+        "- If the user asks to EXPLAIN a specific policy by name: call "
+        "explain_policy_settings with that name.\n"
+        "- If explain_policy_settings returns an error with available_policies, "
+        "present the list to the user and ask which policy they meant.\n\n"
+
+        "## When explaining a policy\n"
+        "For each setting in the returned JSON:\n"
+        "1. State the setting name and what it controls.\n"
+        "2. State the currently configured value and its security effect.\n"
+        "3. If 'available_options' is present, note which option was chosen "
+        "and why it matters from a security perspective.\n"
+        "4. If 'depends_on' is present, note that this setting requires "
+        "another setting to be active — flag this as a dependency.\n"
+        "5. If 'activates' is present, note that this setting enables "
+        "child settings — list them.\n\n"
+
+        "## Output structure\n"
+        "Group settings by category (e.g. BitLocker, Firewall, Defender). "
+        "End with a one-paragraph security posture summary. "
+        "Be precise but avoid unexplained acronyms."
+        ),
     "tools": [compare_to_cis_benchmark],
 }
 

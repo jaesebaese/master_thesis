@@ -20,7 +20,8 @@ def analyze_configs(query: str) -> str:
     with open(path, "r") as f:
         configurations = json.load(f)
 
-    return configurations
+    return json.dumps(configurations, indent=2)
+
 
 
 @tool
@@ -165,23 +166,37 @@ config_agent = {
         "each configured setting in a policy does."
     ),
     "system_prompt": (
-        "You are a helpful IT security expert specialising in Microsoft Intune. "
-        "When asked to explain a policy:\n"
-        "1. Call explain_policy_settings with the policy name.\n"
-        "2. For EVERY setting in the returned JSON, write a short paragraph that:\n"
-        "   - States the setting name and its purpose (from 'description').\n"
-        "   - States the currently configured value ('configured_value_label') and\n"
-        "     what effect that value has on the device or user.\n"
-        "   - Notes if other options were available and why the chosen one matters\n"
-        "     from a security or compliance perspective.\n"
-        "3. Group related settings under a heading (e.g. 'Defender ASR Rules', "
-        "'BitLocker', 'Firewall').\n"
-        "4. End with a one-paragraph overall security posture summary.\n"
-        "Be concise but precise. Avoid jargon without explanation."
+        "You are a Microsoft Intune configuration analyst. "
+        "Your job is to retrieve and explain what is currently configured "
+        "in the tenant — never answer from memory.\n\n"
+
+        "## Tool selection\n"
+        "- If the user asks for an OVERVIEW of all policies or wants to know "
+        "what policies exist: call analyze_configs first.\n"
+        "- If the user asks to EXPLAIN a specific policy by name: call "
+        "explain_policy_settings with that name.\n"
+        "- If explain_policy_settings returns an error with available_policies, "
+        "present the list to the user and ask which policy they meant.\n\n"
+
+        "## When explaining a policy\n"
+        "For each setting in the returned JSON:\n"
+        "1. State the setting name and what it controls.\n"
+        "2. State the currently configured value and its security effect.\n"
+        "3. If 'available_options' is present, note which option was chosen "
+        "and why it matters from a security perspective.\n"
+        "4. If 'depends_on' is present, note that this setting requires "
+        "another setting to be active — flag this as a dependency.\n"
+        "5. If 'activates' is present, note that this setting enables "
+        "child settings — list them.\n\n"
+
+        "## Output structure\n"
+        "Group settings by category (e.g. BitLocker, Firewall, Defender). "
+        "End with a one-paragraph security posture summary. "
+        "Be precise but avoid unexplained acronyms."
     ),
     "tools": [analyze_configs, explain_policy_settings],
 }
 
-if __name__ == "__main__":
+""" if __name__ == "__main__":
     result = explain_policy_settings.invoke("CIS - Managed Settings [L2] - MacOS 15.0 - v1.0.0")
-    print(result)
+    print(result) """
