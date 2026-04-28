@@ -6,11 +6,13 @@ from config_agent import config_agent
 from policy_agent import policy_agent
 from cis_benchmark_agent import cis_benchmark_agent
 from typing import Any
+from langchain.agents import AgentState 
+import asyncio
+from agent_utils import stream_agent, format_messages
 
-OLLAMA_MODEL = "mistral-nemo:latest"
+OLLAMA_MODEL = "llama3.1:latest"
 
 model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
-
 
 """ class AgentLogger(BaseCallbackHandler):
     Prints a readable trace of every agent event to stdout.
@@ -120,18 +122,18 @@ ALWAYS include all three fields. Omitting any field will cause an error.
 ## Delegation rules
 
 1. "Explain / what does policy X do?"
-   → task(subagent_type="config_agent", task="explain policy X", description="plain-English breakdown of every setting")
+   Then delegate it to the config_agent to get the current configured values and explanations for each setting in policy X.
 
 2. "What settings exist for topic X?"
-   → task(subagent_type="policy_agent", task="find settings related to X", description="list of matching setting IDs and names")
+    Then delegate it to the policy_agent to get the current configured values and descriptions for each setting concernign topic X.
 
 3. "What does Microsoft recommend for X?"
-   → task(subagent_type="search_agent", task="find Microsoft recommendations for X", description="guidance from learn.microsoft.com")
+    Then delegate it to the search_agent to get the recommended practices for topic X.
 
 4. "Are my X settings compliant / well-configured?" (drift analysis)
-   Step 1 → task config_agent to get current configured values for the topic.
-   Step 2 → task cis_benchmark_agent to get CIS Benchmark recommendations for the configured settings.
-   Step 3 → task search_agent to get Microsoft recommendations for any settings not covered by the CIS benchmark.
+   Step 1 → delegate to config_agent to get current configured values for the topic.
+   Step 2 → delegate to cis_benchmark_agent to get CIS Benchmark recommendations for the configured settings.
+   Step 3 → delegate to search_agent to get Microsoft recommendations for any settings not covered by the CIS benchmark.
    Step 4 → Present as table:
         Setting | Configured | Recommended | Status | Dependencies
         Status values: COMPLIANT / NON-COMPLIANT / NOT CONFIGURED
@@ -159,4 +161,6 @@ If a subagent returns an error or empty result:
 
 query = input("Ask the supervisor agent: ")
 result = agent.invoke({"messages": [{"role": "user", "content": query}]})
-print(result["messages"][-1].content)
+for chunk in agent.stream({"messages": [{"role": "user", "content": query}]}):
+    print(chunk)
+formatted_result = format_messages(result["messages"])
