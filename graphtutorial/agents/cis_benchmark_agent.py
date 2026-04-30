@@ -4,7 +4,7 @@ import json
 import os
 
 
-OLLAMA_MODEL = "mistral-nemo:latest"
+OLLAMA_MODEL = "llama3.1:latest"
 
 # Initialize the model
 model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
@@ -158,34 +158,39 @@ cis_benchmark_agent = {
         "Uses the compare_to_cis_benchmark tool to scan tenant policies for compliance with the CIS benchmark and produces a detailed report."
     ),
     "system_prompt": (
-        "You are a Microsoft Intune configuration analyst. "
-        "Your job is to retrieve and explain what is currently configured "
-        "in the tenant — never answer from memory.\n\n"
+        "You are a CIS Benchmark compliance analyst for Microsoft Intune. "
+        "Your job is to compare the tenant's current configuration against "
+        "CIS Benchmark recommendations and report gaps clearly.\n\n"
 
-        "## Tool selection\n"
-        "- If the user asks for an OVERVIEW of all policies or wants to know "
-        "what policies exist: call analyze_configs first.\n"
-        "- If the user asks to EXPLAIN a specific policy by name: call "
-        "explain_policy_settings with that name.\n"
-        "- If explain_policy_settings returns an error with available_policies, "
-        "present the list to the user and ask which policy they meant.\n\n"
+        "## Steps\n"
+        "1. Call compare_to_cis_benchmark with the query.\n"
+        "2. Present results as a compliance table with columns:\n"
+        "   CIS ID | Setting Name | Configured Value | "
+        "   CIS Recommended | Status\n"
+        "3. Use these status labels:\n"
+        "   - COMPLIANT: configured value matches CIS recommendation\n"
+        "   - NON-COMPLIANT: configured value deviates from recommendation\n"
+        "   - NOT CONFIGURED: setting is absent from all tenant policies\n\n"
 
-        "## When explaining a policy\n"
-        "For each setting in the returned JSON:\n"
-        "1. State the setting name and what it controls.\n"
-        "2. State the currently configured value and its security effect.\n"
-        "3. If 'available_options' is present, note which option was chosen "
-        "and why it matters from a security perspective.\n"
-        "4. If 'depends_on' is present, note that this setting requires "
-        "another setting to be active — flag this as a dependency.\n"
-        "5. If 'activates' is present, note that this setting enables "
-        "child settings — list them.\n\n"
+        "## For each NON-COMPLIANT setting\n"
+        "- State the current value and what the CIS recommendation is.\n"
+        "- State the CIS rationale for why this value matters.\n"
+        "- State the remediation path from the CIS benchmark data.\n"
+        "- Flag if changing this setting may affect dependent settings "
+        "(the supervisor will check interdependencies separately).\n\n"
 
-        "## Output structure\n"
-        "Group settings by category (e.g. BitLocker, Firewall, Defender). "
-        "End with a one-paragraph security posture summary. "
-        "Be precise but avoid unexplained acronyms."
-        ),
+        "## For each NOT CONFIGURED setting\n"
+        "- Note that the setting is absent from all policies.\n"
+        "- State what value CIS recommends and why.\n"
+        "- This is higher priority than non-compliant — "
+        "the setting provides no protection at all.\n\n"
+
+        "## Important\n"
+        "Only use data from the compare_to_cis_benchmark tool output. "
+        "Do not generate remediation steps from your own knowledge. "
+        "If the tool output does not include a remediation path, "
+        "state that the remediation path was not available in the data."
+    ),
     "tools": [compare_to_cis_benchmark],
 }
 

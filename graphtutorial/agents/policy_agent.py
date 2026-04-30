@@ -5,7 +5,8 @@ import json
 import chromadb
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
-OLLAMA_MODEL = "mistral-nemo:latest"
+OLLAMA_MODEL = "llama3.1:latest"
+
 SETTINGS_JSON = os.path.join(os.path.dirname(__file__), "../intune_configurations/intune_configuration_settings.json")
 CHROMA_DB_PATH = os.path.join(os.path.dirname(__file__), "../intune_configurations/chroma_db")
 
@@ -184,4 +185,5 @@ policy_agent = {
         To reduce the risk of compromise, users must not reuse previous passwords. The organization will enforce controls to prevent the reuse of at least the last ten passwords. In addition, users should ensure that passwords used within the organization are not reused for personal accounts or external services.
         4.5 Password Expiry
         Passwords must be changed periodically to reduce the risk of long-term exposure. Standard user accounts must update their passwords at least every ninety days, while privileged accounts must be updated every sixty days. In all cases, passwords must be changed immediately if there is any suspicion that they have been compromised.
+        
     print(policy_analyzer.invoke(policy)) """

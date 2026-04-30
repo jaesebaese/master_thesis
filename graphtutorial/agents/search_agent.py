@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 
 
-OLLAMA_MODEL = "mistral-nemo:latest"
+OLLAMA_MODEL = "llama3.1:latest"
 
 load_dotenv()
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")

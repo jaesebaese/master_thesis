@@ -3,8 +3,8 @@ from langchain.tools import tool
 import json
 import os
 
+OLLAMA_MODEL = "llama3.1:latest"
 
-OLLAMA_MODEL = "mistral-nemo:latest"
 
 # Initialize the model
 model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
