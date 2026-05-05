@@ -17,6 +17,67 @@ from rich.text import Text
 
 console = Console()
 
+def stream_agent_v2(agent, query, config=None):
+    """Stream a deep agent run with subagent labeling, v2 format."""
+    active_subagents = {}  # tool_call_id -> {type, status}
+    final_state = None
+
+    for chunk in agent.stream(
+        query,
+        stream_mode=["updates", "values"],
+        subgraphs=True,
+        version="v2",
+        config=config,
+    ):
+        ns = chunk["ns"]
+        is_subagent = any(s.startswith("tools:") for s in ns)
+        source = "main" if not is_subagent else next(
+            s for s in ns if s.startswith("tools:")
+        )
+
+        if chunk["type"] == "values":
+            final_state = chunk["data"]
+            continue
+
+        if chunk["type"] != "updates":
+            continue
+
+        for node_name, data in chunk["data"].items():
+            # Track subagent lifecycle from the main agent's perspective
+            if not is_subagent and node_name == "model_request":
+                for msg in (data or {}).get("messages", []):
+                    for tc in getattr(msg, "tool_calls", []) or []:
+                        if tc["name"] == "task":
+                            sub_type = tc["args"].get("subagent_type", "unknown")
+                            active_subagents[tc["id"]] = {
+                                "type": sub_type,
+                                "status": "pending",
+                            }
+                            console.print(
+                                f"[bold cyan]→ Delegating to {sub_type}[/]: "
+                                f"{tc['args'].get('description', '')[:120]}"
+                            )
+
+            if not is_subagent and node_name == "tools":
+                for msg in (data or {}).get("messages", []):
+                    if getattr(msg, "type", None) == "tool":
+                        sub = active_subagents.get(getattr(msg, "tool_call_id", None))
+                        if sub:
+                            sub["status"] = "complete"
+                            console.print(
+                                f"[bold green]✓ {sub['type']} returned[/]"
+                            )
+
+            # Print messages (full length) labeled by source
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if "messages" in key and isinstance(value, list) and value:
+                        label = source if is_subagent else "main"
+                        console.print(f"[dim]── {label} / {node_name} ──[/]")
+                        format_messages(value)
+
+    return final_state
+
 
 def format_message_content(message):
     """Convert message content to displayable string."""
