@@ -4,6 +4,7 @@ from langchain.tools import tool
 import json
 import chromadb
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+from pydantic import BaseModel
 
 OLLAMA_MODEL = "llama3.1:latest"
 
@@ -13,6 +14,12 @@ CHROMA_DB_PATH = os.path.join(os.path.dirname(__file__), "../intune_configuratio
 # Initialize the model -> if not used it will be inherited by the supervisor_agent
 model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
 
+class PolicyAgentResults(BaseModel):
+    id: str
+    name: str
+    description: str
+    platform: str
+    similarity_score: float
 
 def build_intune_vector_db(force_rebuild: bool = False):
     """Embed all settings from intune_configuration_settings.json into a
@@ -104,8 +111,8 @@ def policy_analyzer(query: str) -> str:
     their id, name, description, and platform.
 
     Args:
-        query: A natural-language description of the settings you are looking
-               for, e.g. 'BitLocker recovery password options' or
+        query: A natural-language description of security requirements
+                e.g. 'BitLocker recovery password options' or
                'block executable content from email'.
     """
     collection = _get_collection()
@@ -130,8 +137,94 @@ def policy_analyzer(query: str) -> str:
             "similarity_score": round(1 - distance, 4),
         })
     hits = [h for h in hits if h["similarity_score"] > 0.5]
-
+    print("System prompt:" + policy_agent["system_prompt"])
     return json.dumps(hits, indent=2)
+
+""" @tool
+def policy_requirement_extractor(policy_input: str) -> str:
+    
+    Extract structured security requirements from free-text policy text.
+
+    This tool only extracts requirements. It does not map them to Intune
+    settings, check compliance, or generate remediation advice.
+    
+
+    system_prompt = 
+        You are a security policy requirement extraction engine.
+
+        Your task is to extract enforceable security requirements from free-text policy text.
+
+        You must only extract requirements that are explicitly stated or strongly implied
+        by the provided text.
+
+        Do not:
+        - map requirements to Intune settings
+        - check compliance
+        - recommend remediation
+        - add security best practices that are not in the text
+        - invent values
+        - summarize the policy generally
+
+        Return only valid JSON.
+
+        Use this exact schema:
+
+        {
+        "requirements": [
+            {
+            "requirement_id": "REQ-001",
+            "source_text": "Exact sentence or clause from the policy text.",
+            "security_domain": "password_policy | encryption | firewall | antivirus | authentication | update_management | device_compliance | data_protection | access_control | other",
+            "control_intent": "short_snake_case_description_of_the_control_goal",
+            "expected_value": "specific required value, boolean, number, or null if not specified",
+            "expected_unit": "characters | days | attempts | versions | enabled_disabled | other | null",
+            "applicability": "who or what the requirement applies to, or null",
+            "strength": "mandatory | recommended | prohibited | informational",
+            "confidence": 0.0
+            }
+        ]
+        }
+
+        Rules:
+        - requirement_id must start at REQ-001 and increment sequentially.
+        - source_text must quote the relevant sentence or clause from the input.
+        - security_domain must use one of the listed categories.
+        - control_intent must be short, specific, and written in snake_case.
+        - expected_value must be null if no concrete value is stated.
+        - Do not infer technical configuration settings.
+        - Do not include explanations outside the JSON.
+        - The output must be parseable by json.loads().
+        
+    
+    user_prompt = f
+    Extract structured security requirements from this policy text:
+    {policy_input}
+    
+
+    response = model.invoke([
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ])
+
+    raw_output = response.content.strip()
+
+    # Local models sometimes wrap JSON in ```json fences
+    if raw_output.startswith("```"):
+        raw_output = raw_output.replace("```json", "").replace("```", "").strip()
+
+    try:
+        parsed = json.loads(raw_output)
+    except json.JSONDecodeError:
+        return json.dumps({
+            "requirements": [],
+            "error": "Model returned invalid JSON",
+            "raw_output": raw_output,
+        }, indent=2)
+
+    return json.dumps(parsed, indent=2) """
+
+
+
 
 
 policy_agent = {
@@ -148,42 +241,91 @@ policy_agent = {
         "17,000+ settings using semantic similarity.\n\n"
 
         "## How to search\n"
-        "1. Call policy_analyzer with the user's query.\n"
-        "2. If results have similarity_score below 0.5, try a reformulated "
+        "1. Call policy_analyzer with the security policy input from the user.\n"
+        "2. The policy_analyzer tool will return a list of settings with similarity scores.\n"
+        "3. If results have similarity_score below 0.5, try a reformulated "
         "query with different keywords before presenting results.\n"
-        "3. Only present results with similarity_score above 0.4. "
+        "4. Only present results with similarity_score above 0.4. "
         "Discard the rest.\n\n"
 
         "## Output format\n"
-        "Group results by platform (Windows, macOS, iOS, Android). "
-        "For each result show: setting name, short description, "
-        "platform, and similarity score. "
-        "Always include the setting ID — it is needed for downstream "
-        "compliance and interdependency checks.\n\n"
-
-        "## Important\n"
-        "You are discovering what settings EXIST in the catalog — not what "
-        "is currently configured in the tenant. Never confuse these two. "
-        "If the user wants to know what IS configured, they should use "
-        "the config_agent instead."
+        "Return a JSON array of relevant settings with this schema:\n" 
+        "[\n"
+        "  {\n"
+        "    'id': 'Setting Id',\n"
+        "    'name': 'Setting Display Name',\n"
+        "    'description': 'Setting Description',\n"
+        "    'platform': 'platform',\n"
+        "    'similarity_score': 0.0\n"
+        "  }\n"
+        "]\n"
     ),
     "tools": [policy_analyzer],
+    "response_format": PolicyAgentResults
 }
 
-
-""" if __name__ == "__main__":
+""" 
+if __name__ == "__main__":
     build_intune_vector_db(force_rebuild=False)
-    print("\n--- Similarity search: 'Password Requirements' ---\n")
-    policy = 4. Password Requirements
-        4.1 General Principles
-        All passwords must be created in a way that ensures they are difficult to guess or compromise. Users must ensure that passwords are unique to each system and are not reused across different services. Passwords must remain confidential at all times and must not be shared with any other individual, including IT personnel. Furthermore, passwords must not be stored in plain text, whether digitally or physically, unless they are protected by approved secure storage mechanisms such as password managers.
-        4.2 Complexity Requirements
-        Passwords must meet a minimum length of twelve characters and include a combination of uppercase letters, lowercase letters, numbers, and special characters. Users must avoid using easily guessable information such as names, usernames, dates of birth, or common words found in dictionaries. The intent is to ensure that passwords are resistant to brute-force and dictionary-based attacks.
-        4.3 Passphrases
-        Where systems allow, users are encouraged to create passphrases instead of traditional passwords. A passphrase should consist of at least sixteen characters and be composed of multiple unrelated words combined with numbers or special characters. This approach increases memorability while maintaining a high level of security.
-        4.4 Password Reuse
-        To reduce the risk of compromise, users must not reuse previous passwords. The organization will enforce controls to prevent the reuse of at least the last ten passwords. In addition, users should ensure that passwords used within the organization are not reused for personal accounts or external services.
-        4.5 Password Expiry
-        Passwords must be changed periodically to reduce the risk of long-term exposure. Standard user accounts must update their passwords at least every ninety days, while privileged accounts must be updated every sixty days. In all cases, passwords must be changed immediately if there is any suspicion that they have been compromised.
-        
-    print(policy_analyzer.invoke(policy)) """
+    policy =
+All passwords must be created in a way that ensures they are difficult to guess or compromise. Users must ensure that passwords are unique to each system and are not reused across different services. Passwords must remain confidential at all times and must not be shared with any other individual, including IT personnel. Furthermore, passwords must not be stored in plain text, whether digitally or physically, unless they are protected by approved secure storage mechanisms such as password managers.
+4.2 Complexity Requirements
+Passwords must meet a minimum length of twelve characters and include a combination of uppercase letters, lowercase letters, numbers, and special characters. Users must avoid using easily guessable information such as names, usernames, dates of birth, or common words found in dictionaries. The intent is to ensure that passwords are resistant to brute-force and dictionary-based attacks.
+4.3 Passphrases
+Where systems allow, users are encouraged to create passphrases instead of traditional passwords. A passphrase should consist of at least sixteen characters and be composed of multiple unrelated words combined with numbers or special characters. This approach increases memorability while maintaining a high level of security.
+4.4 Password Reuse
+To reduce the risk of compromise, users must not reuse previous passwords. The organization will enforce controls to prevent the reuse of at least the last ten passwords. In addition, users should ensure that passwords used within the organization are not reused for personal accounts or external services.
+4.5 Password Expiry
+Passwords must be changed periodically to reduce the risk of long-term exposure. Standard user accounts must update their passwords at least every ninety days, while privileged accounts must be updated every sixty days. In all cases, passwords must be changed immediately if there is any suspicion that they have been compromised.
+5. Multi-Factor Authentication
+To enhance security beyond passwords alone, multi-factor authentication is required for access to sensitive systems, remote access services, and all privileged accounts. This additional layer of verification may include authenticator applications, hardware tokens, or biometric factors where appropriate. The use of multi-factor authentication significantly reduces the risk of unauthorized access even if a password is compromised.
+6. Account Protection
+6.1 Failed Login Attempts
+To protect against unauthorized access attempts, accounts will be automatically locked after a defined number of unsuccessful login attempts. Specifically, after five failed attempts, the account will be locked for a minimum of fifteen minutes or until it is reset by authorized personnel. This measure helps mitigate brute-force attacks.
+6.2 Session Management
+User sessions must be managed to reduce the risk of unauthorized access due to unattended devices. Systems will automatically terminate sessions after fifteen minutes of inactivity, requiring users to re-authenticate to regain access. This ensures that access is limited to active and authorized users only.
+7. Storage and Transmission
+Passwords must be handled securely both at rest and in transit. Under no circumstances may passwords be stored in plain text. Instead, they must be protected using strong cryptographic hashing algorithms such as bcrypt or Argon2. Additionally, passwords must only be transmitted over secure channels that provide encryption, ensuring that they cannot be intercepted or read by unauthorized parties.
+8. User Responsibilities
+All users are responsible for maintaining the confidentiality and security of their passwords. This includes selecting strong passwords, not sharing them with others, and promptly reporting any suspected compromise. Users are also expected to use only organization-approved tools, such as password managers, for storing and managing their credentials. Care must be taken to ensure that passwords used for corporate systems are not reused in personal contexts.
+9. Privileged Accounts
+Accounts with elevated privileges require additional safeguards due to their increased access to sensitive systems and data. These accounts must use stronger passwords, with a minimum length of sixteen characters, and must always be protected by multi-factor authentication. The use of privileged accounts must be strictly controlled, monitored, and logged. Shared use of privileged accounts is not permitted, as it prevents accountability and traceability.
+10. Enforcement
+10.1 Technical Enforcement
+The organization will implement technical controls to enforce this policy consistently across all systems. These controls include enforcing password complexity requirements, preventing password reuse, requiring periodic password changes, and enabling account lockout mechanisms. Multi-factor authentication will be enforced where required, and authentication events will be logged and monitored to detect suspicious activity.
+10.2 Administrative Enforcement
+In addition to technical measures, the organization will conduct regular audits and access reviews to ensure compliance with this policy. Access rights will be reviewed periodically and adjusted as necessary based on role changes or termination of employment. Non-compliance will be addressed through appropriate administrative actions.
+10.3 Non-Compliance
+Failure to comply with this policy may result in disciplinary measures, which can include restriction of access rights, formal warnings, or termination of employment or contractual agreements, depending on the severity of the violation.   
+
+    policy_2 = All USB storage devices must be blocked on organizational endpoints to prevent unauthorized data transfer and mitigate the risk of malware infections. This policy applies to all employees, contractors, and third-party users who access organizational systems and data. The use of USB storage devices is prohibited unless explicitly authorized by the IT department for specific business needs. Exceptions may be granted on a case-by-case basis, but only after a thorough risk assessment and implementation of appropriate security controls. Users must not attempt to bypass this policy by using alternative methods of data transfer, such as personal email accounts or cloud storage services, without prior approval. Violations of this policy may result in disciplinary action, up to and including termination of employment or contract. The organization will implement technical controls to enforce this policy, such as endpoint security solutions that block USB storage device access and monitor for any attempts to connect unauthorized devices.
+    
+    print("\n--- Extracted policy requirements ---\n")
+    #requirements_json = policy_requirement_extractor.invoke({"policy_input": policy})
+    #print(requirements_json)
+
+    requirements = json.loads(requirements_json)["requirements"]
+
+    print("\n--- Matching Intune settings per requirement ---\n")
+
+    for requirement in requirements:
+        query = " ".join([
+            str(requirement.get("security_domain") or ""),
+            str(requirement.get("source_text") or ""),
+            str(requirement.get("control_intent") or ""),
+            str(requirement.get("expected_value") or ""),
+            str(requirement.get("expected_unit") or ""),
+        ])
+
+        print(f"\n### {requirement['requirement_id']} — {requirement['control_intent']} ###")
+        print(f"Query: {query}\n")
+
+        matches = policy_analyzer.invoke({"query": query})
+        print(matches) 
+
+    
+    print("\n--- Matching Intune settings per requirement ---\n")
+    matches = policy_analyzer.invoke({"query": policy})
+    print(matches)
+
+"""

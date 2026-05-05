@@ -10,21 +10,6 @@ OLLAMA_MODEL = "llama3.1:latest"
 model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
 
 
-@tool
-def analyze_configs(query: str) -> str:
-    """Retrieve all security configuration policies. Returns policy names,
-    descriptions, platforms and technologies so you can analyze which ones
-    are relevant to the query."""
-
-    path = os.path.join(os.path.dirname(__file__), "../configurations", "policies_and_settings_expand.json")
-    with open(path, "r") as f:
-        configurations = json.load(f)
-
-    return json.dumps(configurations, indent=2)
-
-
-
-@tool
 def explain_policy_settings(policy_name: str) -> str:
     """Look up a policy by name in policies_and_settings_expand.json, resolve each
     configured setting against the full Intune settings definition catalog, and
@@ -128,7 +113,7 @@ def explain_policy_settings(policy_name: str) -> str:
             "configured_value_label": str(item["chosenOptionId"]),  # default
         }
 
-        print(entry)
+        #print(entry)
 
         # For choice settings resolve the selected option's display name
         if item["type"] == "choice" and item["chosenOptionId"]:
@@ -152,18 +137,33 @@ def explain_policy_settings(policy_name: str) -> str:
         "settings_count": len(explanations),
         "settings": explanations,
     }
-
-    
-
     return json.dumps(result, indent=2)
+
+@tool
+def analyze_configs(query: str) -> str:
+    """Retrieve all security configuration policies. Returns policy names,
+    descriptions, platforms and technologies so you can analyze which ones
+    are relevant to the query."""
+
+    path = os.path.join(os.path.dirname(__file__), "../configurations", "policies_and_settings_expand.json")
+    with open(path, "r") as f:
+        configurations = json.load(f)
+
+    all_explanations = []
+    for config in configurations:
+        name = config.get("name", "")
+        explanation_json = explain_policy_settings(name)
+        all_explanations.append(json.loads(explanation_json))
+
+    return json.dumps(all_explanations, indent=2)
+
 
 
 config_agent = {
     "name": "config_agent",
     "description": (
         "Retrieves and analyzes Intune configuration policies. "
-        "Use explain_policy_settings to get a plain-English explanation of what "
-        "each configured setting in a policy does."
+        "Use the analyze_configs tool to get detailed explanations of currently configured policies and settings in the tenant. "
     ),
     "system_prompt": (
         "You are a Microsoft Intune configuration analyst. "
@@ -172,11 +172,7 @@ config_agent = {
 
         "## Tool selection\n"
         "- If the user asks for an OVERVIEW of all policies or wants to know "
-        "what policies exist: call analyze_configs first.\n"
-        "- If the user asks to EXPLAIN a specific policy by name: call "
-        "explain_policy_settings with that name.\n"
-        "- If explain_policy_settings returns an error with available_policies, "
-        "present the list to the user and ask which policy they meant.\n\n"
+        "what policies exist: call analyze_configs and return explanations for each configuration.\n"
 
         "## When explaining a policy\n"
         "For each setting in the returned JSON:\n"
@@ -194,9 +190,9 @@ config_agent = {
         "End with a one-paragraph security posture summary. "
         "Be precise but avoid unexplained acronyms."
     ),
-    "tools": [analyze_configs, explain_policy_settings],
+    "tools": [analyze_configs],
 }
 
-""" if __name__ == "__main__":
-    result = explain_policy_settings.invoke("CIS - Managed Settings [L2] - MacOS 15.0 - v1.0.0")
-    print(result) """
+"""if __name__ == "__main__":
+    result = analyze_configs.invoke("Explain all currently configured policies and settings in the tenant, with a focus on security implications.")
+    print(result)"""
