@@ -4,22 +4,35 @@ from langchain.tools import tool
 import json
 import chromadb
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 OLLAMA_MODEL = "llama3.1:latest"
 
+OPENAI_API_MODEL = "gpt-5.4-nano-2026-03-17"
+
 SETTINGS_JSON = os.path.join(os.path.dirname(__file__), "../intune_configurations/intune_configuration_settings.json")
 CHROMA_DB_PATH = os.path.join(os.path.dirname(__file__), "../intune_configurations/chroma_db")
+INTUNE_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../configurations/policies_and_settings_expand.json")
 
 # Initialize the model -> if not used it will be inherited by the supervisor_agent
-model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
+#model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
+model = init_chat_model(model=OPENAI_API_MODEL, model_provider="openai", temperature=0.0)
 
-class PolicyAgentResults(BaseModel):
+class PolicySetting(BaseModel):
     id: str
     name: str
     description: str
     platform: str
     similarity_score: float
+
+class PolicyAgentResults(BaseModel):
+    settings: list[PolicySetting] = Field(
+        description="All relevant Intune settings with similarity_score above 0.4"
+    )
 
 def build_intune_vector_db(force_rebuild: bool = False):
     """Embed all settings from intune_configuration_settings.json into a
@@ -224,7 +237,107 @@ def policy_requirement_extractor(policy_input: str) -> str:
     return json.dumps(parsed, indent=2) """
 
 
+RELEVANCE_SYSTEM_PROMPT = """\
+You are an Intune settings discovery specialist. Your role is to identify which
+of the tenant's CURRENTLY CONFIGURED Intune settings are relevant to a given
+security policy or topic.
 
+You will receive:
+1. A security policy (free text).
+2. A JSON array of settings currently configured in the tenant. Each entry has
+   at minimum an id, name, description, platform, and configured value.
+
+Your task: return ONLY the settings from the input array that are relevant to
+the policy. Do not invent settings. Do not include settings unrelated to the
+policy. Preserve every field from the input verbatim — id, name, description,
+platform, configured value — exactly as given.
+
+Output format: a JSON object of the form
+{
+  "settings": [
+    { ...verbatim entry from input... },
+    ...
+  ]
+}
+
+Rules:
+- Use only IDs that appear in the input.
+- If no settings are relevant, return {"settings": []}.
+- Do not add explanations outside the JSON.
+- The output must be parseable by json.loads().
+"""
+def flatten_for_relevance(raw_policies):
+    """Extract just the fields the LLM needs to judge relevance."""
+    flat = []
+    for policy in raw_policies:
+        for setting in policy.get("settings", []):
+            inst = setting.get("settingInstance", {})
+            sid = inst.get("settingDefinitionId")
+            if not sid:
+                continue
+            
+            # Extract configured value (depending on instance type)
+            value = None
+            if "choiceSettingValue" in inst:
+                value = inst["choiceSettingValue"].get("value")
+            elif "simpleSettingValue" in inst:
+                value = inst["simpleSettingValue"].get("value")
+            
+            flat.append({
+                "id": sid,
+                "policy_name": policy.get("name", ""),
+                "configured_value": value,
+                "description": policy.get("description", ""),
+            })
+    return flat
+
+@tool
+def find_relevant_configured_settings(policy_input: str) -> str:
+    """Identify which currently-configured Intune settings are relevant to
+    the given security policy or topic. Uses an LLM to reason over the
+    tenant's configured settings.
+
+    Args:
+        policy_input: A natural-language security policy or topic
+                      (e.g., 'password complexity requirements', or a
+                      multi-paragraph policy document).
+
+    Returns:
+        A JSON string with a `settings` array containing the relevant
+        configured settings, with all fields preserved verbatim.
+    """
+    with open(INTUNE_CONFIG_PATH) as f:
+        configured_settings = json.load(f)
+
+    flattened_settings = flatten_for_relevance(configured_settings)
+
+    user_prompt = (
+        f"SECURITY POLICY:\n{policy_input}\n\n"
+        f"TENANT'S CONFIGURED SETTINGS:\n{json.dumps(flattened_settings, indent=2)}\n\n"
+        f"Return the relevant settings as JSON."
+    )
+
+    response = model.invoke([
+        {"role": "system", "content": RELEVANCE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ])
+
+    raw = response.content.strip()
+
+    # LLMs sometimes wrap JSON in ```json fences
+    if raw.startswith("```"):
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
+    # Validate JSON before returning, fall through gracefully
+    try:
+        parsed = json.loads(raw)
+        return json.dumps(parsed, indent=2)
+    except json.JSONDecodeError:
+        return json.dumps({
+            "settings": [],
+            "error": "Model returned invalid JSON",
+            "raw_output": raw,
+        }, indent=2)
 
 
 policy_agent = {
@@ -245,11 +358,12 @@ policy_agent = {
         "2. The policy_analyzer tool will return a list of settings with similarity scores.\n"
         "3. If results have similarity_score below 0.5, try a reformulated "
         "query with different keywords before presenting results.\n"
-        "4. Only present results with similarity_score above 0.4. "
-        "Discard the rest.\n\n"
+        
 
         "## Output format\n"
-        "Return a JSON array of relevant settings with this schema:\n" 
+        "Return the exact same object you receive from the policy_analyzer tool with a `settings` array containing all relevant settings"
+        "Each entry must include id, name, description, platform, and"
+        "similarity_score copied verbatim from the policy_analyzer tool output. "
         "[\n"
         "  {\n"
         "    'id': 'Setting Id',\n"
@@ -264,10 +378,10 @@ policy_agent = {
     "response_format": PolicyAgentResults
 }
 
-""" 
+
 if __name__ == "__main__":
     build_intune_vector_db(force_rebuild=False)
-    policy =
+    policy =""" 
 All passwords must be created in a way that ensures they are difficult to guess or compromise. Users must ensure that passwords are unique to each system and are not reused across different services. Passwords must remain confidential at all times and must not be shared with any other individual, including IT personnel. Furthermore, passwords must not be stored in plain text, whether digitally or physically, unless they are protected by approved secure storage mechanisms such as password managers.
 4.2 Complexity Requirements
 Passwords must meet a minimum length of twelve characters and include a combination of uppercase letters, lowercase letters, numbers, and special characters. Users must avoid using easily guessable information such as names, usernames, dates of birth, or common words found in dictionaries. The intent is to ensure that passwords are resistant to brute-force and dictionary-based attacks.
@@ -297,14 +411,14 @@ The organization will implement technical controls to enforce this policy consis
 In addition to technical measures, the organization will conduct regular audits and access reviews to ensure compliance with this policy. Access rights will be reviewed periodically and adjusted as necessary based on role changes or termination of employment. Non-compliance will be addressed through appropriate administrative actions.
 10.3 Non-Compliance
 Failure to comply with this policy may result in disciplinary measures, which can include restriction of access rights, formal warnings, or termination of employment or contractual agreements, depending on the severity of the violation.   
-
-    policy_2 = All USB storage devices must be blocked on organizational endpoints to prevent unauthorized data transfer and mitigate the risk of malware infections. This policy applies to all employees, contractors, and third-party users who access organizational systems and data. The use of USB storage devices is prohibited unless explicitly authorized by the IT department for specific business needs. Exceptions may be granted on a case-by-case basis, but only after a thorough risk assessment and implementation of appropriate security controls. Users must not attempt to bypass this policy by using alternative methods of data transfer, such as personal email accounts or cloud storage services, without prior approval. Violations of this policy may result in disciplinary action, up to and including termination of employment or contract. The organization will implement technical controls to enforce this policy, such as endpoint security solutions that block USB storage device access and monitor for any attempts to connect unauthorized devices.
+"""
+    #policy_2 = All USB storage devices must be blocked on organizational endpoints to prevent unauthorized data transfer and mitigate the risk of malware infections. This policy applies to all employees, contractors, and third-party users who access organizational systems and data. The use of USB storage devices is prohibited unless explicitly authorized by the IT department for specific business needs. Exceptions may be granted on a case-by-case basis, but only after a thorough risk assessment and implementation of appropriate security controls. Users must not attempt to bypass this policy by using alternative methods of data transfer, such as personal email accounts or cloud storage services, without prior approval. Violations of this policy may result in disciplinary action, up to and including termination of employment or contract. The organization will implement technical controls to enforce this policy, such as endpoint security solutions that block USB storage device access and monitor for any attempts to connect unauthorized devices.
     
     print("\n--- Extracted policy requirements ---\n")
     #requirements_json = policy_requirement_extractor.invoke({"policy_input": policy})
     #print(requirements_json)
 
-    requirements = json.loads(requirements_json)["requirements"]
+    """requirements = json.loads(requirements_json)["requirements"]
 
     print("\n--- Matching Intune settings per requirement ---\n")
 
@@ -327,5 +441,7 @@ Failure to comply with this policy may result in disciplinary measures, which ca
     print("\n--- Matching Intune settings per requirement ---\n")
     matches = policy_analyzer.invoke({"query": policy})
     print(matches)
-
 """
+    result = find_relevant_configured_settings.invoke({
+    "policy_input": policy})
+    print(result)
