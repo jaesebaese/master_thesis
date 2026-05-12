@@ -10,24 +10,31 @@ import os
 
 load_dotenv()
 
-OLLAMA_MODEL = "llama3.1:latest"
+OLLAMA_MODEL = "minimax-m2.5:cloud"
 
 OPENAI_API_MODEL = "gpt-5.4-nano-2026-03-17"
 
 SETTINGS_JSON = os.path.join(os.path.dirname(__file__), "../intune_configurations/intune_configuration_settings.json")
 CHROMA_DB_PATH = os.path.join(os.path.dirname(__file__), "../intune_configurations/chroma_db")
-INTUNE_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../configurations/policies_and_settings_expand.json")
+TENANT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../configurations/policies_and_settings_expand.json")
 
 # Initialize the model -> if not used it will be inherited by the supervisor_agent
 #model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
 model = init_chat_model(model=OPENAI_API_MODEL, model_provider="openai", temperature=0.0)
-
+""" model = init_chat_model(
+    model=OLLAMA_MODEL,
+    model_provider="ollama",
+    base_url="https://ollama.com",
+    client_kwargs={"headers": {"Authorization": f"Bearer {os.getenv('OLLAMA_API_KEY')}"}},
+    temperature=0.0,
+)
+ """
 class PolicySetting(BaseModel):
     id: str
     name: str
     description: str
     platform: str
-    similarity_score: float
+    #similarity_score: float
 
 class PolicyAgentResults(BaseModel):
     settings: list[PolicySetting] = Field(
@@ -110,7 +117,7 @@ def build_intune_vector_db(force_rebuild: bool = False):
     return collection
 
 
-def _get_collection():
+def _get_intune_collection():
     """Load the persisted ChromaDB collection. Raises if the DB hasn't been built yet."""
     client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
     ef = DefaultEmbeddingFunction()
@@ -128,7 +135,7 @@ def policy_analyzer(query: str) -> str:
                 e.g. 'BitLocker recovery password options' or
                'block executable content from email'.
     """
-    collection = _get_collection()
+    collection = _get_intune_collection()
 
     results = collection.query(
         query_texts=[query],
@@ -266,7 +273,7 @@ Rules:
 - Do not add explanations outside the JSON.
 - The output must be parseable by json.loads().
 """
-def flatten_for_relevance(raw_policies):
+def flatten_for_relevance_old(raw_policies):
     """Extract just the fields the LLM needs to judge relevance."""
     flat = []
     for policy in raw_policies:
@@ -291,6 +298,131 @@ def flatten_for_relevance(raw_policies):
             })
     return flat
 
+
+def _resolve_choice_label(defn: dict, chosen_id: str) -> tuple[str, list[str]]:
+    """Given a setting definition and a chosen option ID, return the
+    human-readable label and the full list of available option labels.
+    Returns (chosen_id, []) if the catalog has no options for this setting.
+    """
+    options = defn.get("options", []) if defn else []
+    if not options:
+        return chosen_id, []
+
+    option_map = {
+        o["itemId"]: (o.get("displayName") or o.get("name") or o["itemId"])
+        for o in options
+    }
+    label = option_map.get(chosen_id, chosen_id)
+    return label, list(option_map.values())
+
+
+def _walk_setting_instance(
+    instance: dict,
+    policy_info: dict,
+    catalog: dict,
+    parent_chain: list,
+    parent_chosen_label: str | None,
+    out: list,
+) -> None:
+    """Walk a settingInstance recursively, emitting one flat enriched record
+    per setting (parent and child alike). Each record includes catalog
+    metadata, a parent chain, and dependency condition info if applicable.
+    """
+    sid = instance.get("settingDefinitionId", "")
+    dtype = instance.get("@odata.type", "")
+    defn = catalog.get(sid)
+
+    # Determine the configured value and instance type
+    chosen_id = None
+    setting_type = "unknown"
+    available_options: list[str] = []
+
+    if "ChoiceSettingInstance" in dtype:
+        chosen_id = instance.get("choiceSettingValue", {}).get("value", "") or None
+        setting_type = "choice"
+    elif "SimpleSettingInstance" in dtype:
+        chosen_id = instance.get("simpleSettingValue", {}).get("value", "")
+        setting_type = "simple"
+    elif "SimpleSettingCollectionInstance" in dtype:
+        chosen_id = [
+            v.get("value")
+            for v in instance.get("simpleSettingCollectionValue", [])
+        ]
+        setting_type = "simpleCollection"
+    elif "GroupSettingCollectionInstance" in dtype or "GroupSettingInstance" in dtype:
+        chosen_id = None
+        setting_type = "group"
+
+    # Resolve a human-readable label for choice settings
+    label = str(chosen_id)
+    if setting_type == "choice" and chosen_id:
+        label, available_options = _resolve_choice_label(defn or {}, chosen_id)
+
+    # Build the record (only emit if this node has its own ID)
+    if sid:
+        record = {
+            "id": sid,
+            "name": (defn.get("displayName") or defn.get("name") or sid) if defn else sid,
+            "description": (defn.get("description") or defn.get("helpText") or "") if defn else "",
+            "platform": (defn.get("applicability", {}).get("platform", "") if defn else ""),
+            "type": setting_type,
+            "configured_value": chosen_id,
+            "configured_value_label": label,
+            "parent_setting_id": parent_chain[-1] if parent_chain else None,
+            "parent_chain": list(parent_chain),
+            "policy_name": policy_info["policy_name"],
+            "policy_id": policy_info["policy_id"],
+        }
+        if available_options:
+            record["available_options"] = available_options
+        if parent_chain:
+            record["dependency_condition"] = {
+                "parent_id": parent_chain[-1],
+                "parent_chosen_label": parent_chosen_label,
+                # `active` could be enriched later by interdependency_agent
+                # using catalog metadata about which parent values gate which children
+                "active_unknown": True,
+            }
+        #print(record)    
+        out.append(record)
+
+    # Recurse into children of this node, passing this node's label down
+    new_chain = parent_chain + [sid] if sid else parent_chain
+    new_parent_label = label if setting_type == "choice" else parent_chosen_label
+
+    if "ChoiceSettingInstance" in dtype:
+        for child in instance.get("choiceSettingValue", {}).get("children", []) or []:
+            _walk_setting_instance(child, policy_info, catalog, new_chain, new_parent_label, out)
+    elif "GroupSettingCollectionInstance" in dtype:
+        for group_val in instance.get("groupSettingCollectionValue", []) or []:
+            for child in group_val.get("children", []) or []:
+                _walk_setting_instance(child, policy_info, catalog, new_chain, new_parent_label, out)
+    elif "GroupSettingInstance" in dtype:
+        for child in instance.get("groupSettingValue", {}).get("children", []) or []:
+            _walk_setting_instance(child, policy_info, catalog, new_chain, new_parent_label, out)
+
+
+def flatten_for_relevance(raw_policies: list, catalog: dict) -> list:
+    """Walk every policy's settings tree and produce a flat list of enriched
+    records — one per configured setting (parent and child alike).
+    """
+    flat = []
+    for policy in raw_policies:
+        policy_info = {
+            "policy_name": policy.get("name", ""),
+            "policy_id": policy.get("id", ""),
+        }
+        for setting in policy.get("settings", []):
+            _walk_setting_instance(
+                setting.get("settingInstance", {}),
+                policy_info,
+                catalog,
+                parent_chain=[],
+                parent_chosen_label=None,
+                out=flat,
+            )
+    return flat
+
 @tool
 def find_relevant_configured_settings(policy_input: str) -> str:
     """Identify which currently-configured Intune settings are relevant to
@@ -306,10 +438,13 @@ def find_relevant_configured_settings(policy_input: str) -> str:
         A JSON string with a `settings` array containing the relevant
         configured settings, with all fields preserved verbatim.
     """
-    with open(INTUNE_CONFIG_PATH) as f:
+    with open(TENANT_CONFIG_PATH) as f:
         configured_settings = json.load(f)
 
-    flattened_settings = flatten_for_relevance(configured_settings)
+    with open(SETTINGS_JSON) as f:
+        catalog = {s["id"]: s for s in json.load(f)}
+
+    flattened_settings = flatten_for_relevance(configured_settings, catalog)
 
     user_prompt = (
         f"SECURITY POLICY:\n{policy_input}\n\n"
@@ -343,38 +478,45 @@ def find_relevant_configured_settings(policy_input: str) -> str:
 policy_agent = {
     "name": "policy_agent",
     "description": (
-        "Searches the Intune settings catalog using semantic similarity. "
+        "Searches the tenant's configuration settings using semantic similarity. "
         "Use this to find which configuration settings relate to a given topic "
         "such as 'BitLocker', 'firewall inbound rules', or 'password complexity'."
     ),
-    "system_prompt": (
-        "You are an Intune settings discovery specialist. "
-        "Your role is to find which Microsoft Intune configuration settings "
-        "are relevant to a given security topic. You search a catalog of "
-        "17,000+ settings using semantic similarity.\n\n"
+    "system_prompt": ("""\
+You are an Intune settings discovery specialist. Your role is to identify which
+of the tenant's CURRENTLY CONFIGURED Intune settings are relevant to a given
+security policy or topic.
 
-        "## How to search\n"
-        "1. Call policy_analyzer with the security policy input from the user.\n"
-        "2. The policy_analyzer tool will return a list of settings with similarity scores.\n"
-        "3. If results have similarity_score below 0.5, try a reformulated "
-        "query with different keywords before presenting results.\n"
-        
+You will receive:
+1. A security policy (free text).
+2. A JSON array of settings currently configured in the tenant. Each entry has
+   at minimum an id, name, description, platform, and configured value.
 
-        "## Output format\n"
-        "Return the exact same object you receive from the policy_analyzer tool with a `settings` array containing all relevant settings"
-        "Each entry must include id, name, description, platform, and"
-        "similarity_score copied verbatim from the policy_analyzer tool output. "
-        "[\n"
-        "  {\n"
-        "    'id': 'Setting Id',\n"
-        "    'name': 'Setting Display Name',\n"
-        "    'description': 'Setting Description',\n"
-        "    'platform': 'platform',\n"
-        "    'similarity_score': 0.0\n"
-        "  }\n"
-        "]\n"
+Your task: Use the find_relevant_configured_settings tool to analyze the policy and
+return ONLY the settings from the input array that are relevant to
+the policy. Do not invent settings. Do not include settings unrelated to the
+policy. Preserve every field from the input verbatim — id, name, description,
+platform, configured value — exactly as given.
+
+Output format: a JSON object of the form
+    [
+        {
+            'id': 'Setting Id',
+            'name': 'Setting Display Name',
+            'description': 'Setting Description',
+            'platform': 'platform'
+        },
+            ...
+    ]
+
+Rules:
+- Use only IDs that appear in the input.
+- If no settings are relevant, return {"settings": []}.
+- Do not add explanations outside the JSON.
+- The output must be parseable by json.loads().
+"""       
     ),
-    "tools": [policy_analyzer],
+    "tools": [find_relevant_configured_settings],
     "response_format": PolicyAgentResults
 }
 
