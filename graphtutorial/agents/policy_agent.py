@@ -1,6 +1,6 @@
 import os
 from langchain.chat_models import init_chat_model
-from langchain.tools import tool
+from langchain.tools import tool, ToolRuntime
 import json
 import chromadb
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
@@ -424,20 +424,38 @@ def flatten_for_relevance(raw_policies: list, catalog: dict) -> list:
     return flat
 
 @tool
-def find_relevant_configured_settings(policy_input: str) -> str:
+def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | None = None) -> str:
     """Identify which currently-configured Intune settings are relevant to
-    the given security policy or topic. Uses an LLM to reason over the
-    tenant's configured settings.
+    a security policy or topic.
 
-    Args:
-        policy_input: A natural-language security policy or topic
-                      (e.g., 'password complexity requirements', or a
-                      multi-paragraph policy document).
+    When policy_input is omitted, reads the policy from password_policy.txt
+    in the virtual filesystem (or from disk as a fallback). When policy_input
+    is provided, uses it directly.
 
     Returns:
         A JSON string with a `settings` array containing the relevant
         configured settings, with all fields preserved verbatim.
     """
+    if not policy_input:
+        files = runtime.state.get("files", {})
+        file_entry = files.get("/password_policy.txt") or files.get("password_policy.txt")
+        if file_entry is not None:
+            if isinstance(file_entry, dict):
+                raw = file_entry.get("content", [])
+                policy_input = "\n".join(raw) if isinstance(raw, list) else str(raw)
+            else:
+                policy_input = str(file_entry)
+        else:
+            disk_path = os.path.join(os.path.dirname(__file__), "password_policy.txt")
+            try:
+                with open(disk_path) as f:
+                    policy_input = f.read()
+            except FileNotFoundError:
+                return json.dumps({
+                    "settings": [],
+                    "error": "password_policy.txt not found in virtual filesystem or on disk.",
+                })
+
     with open(TENANT_CONFIG_PATH) as f:
         configured_settings = json.load(f)
 
@@ -492,22 +510,17 @@ You will receive:
 2. A JSON array of settings currently configured in the tenant. Each entry has
    at minimum an id, name, description, platform, and configured value.
 
-Your task: Use the find_relevant_configured_settings tool to analyze the policy and
-return ONLY the settings from the input array that are relevant to
-the policy. Do not invent settings. Do not include settings unrelated to the
-policy. Preserve every field from the input verbatim — id, name, description,
-platform, configured value — exactly as given.
+Your task:
+1. Call find_relevant_configured_settings() with NO arguments — it reads
+   password_policy.txt automatically and returns the relevant settings.
+2. Call write_file with:
+     path: 'policy_results.json'
+     content: the raw JSON string returned by find_relevant_configured_settings
+   Do this before summarising the results.
 
-Output format: a JSON object of the form
-    [
-        {
-            'id': 'Setting Id',
-            'name': 'Setting Display Name',
-            'description': 'Setting Description',
-            'platform': 'platform'
-        },
-            ...
-    ]
+Return ONLY the settings from the tenant array that are relevant to the policy.
+Do not invent settings. Preserve every field verbatim — id, name, description,
+platform, configured value — exactly as given.
 
 Rules:
 - Use only IDs that appear in the input.

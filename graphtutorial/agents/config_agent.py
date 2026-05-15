@@ -1,13 +1,15 @@
 from langchain.chat_models import init_chat_model
-from langchain.tools import tool
+from langchain.tools import tool, ToolRuntime
+from typing import List
 import json
 import os
+from policy_agent import PolicyAgentResults
 
-OLLAMA_MODEL = "llama3.1:latest"
+OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
 
 
 # Initialize the model
-model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
+model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature=0.0)
 
 
 def explain_policy_settings(policy_name: str) -> str:
@@ -140,10 +142,104 @@ def explain_policy_settings(policy_name: str) -> str:
     return json.dumps(result, indent=2)
 
 @tool
-def analyze_configs(query: str) -> str:
-    """Retrieve all security configuration policies. Returns policy names,
-    descriptions, platforms and technologies so you can analyze which ones
-    are relevant to the query."""
+def find_configs_in_policies(runtime: ToolRuntime, configs: List[PolicyAgentResults] | None = None) -> str:
+    """Check which configured settings appear in policies_and_settings_expand.json.
+
+    When configs is omitted, reads policy_results.json from the virtual
+    filesystem (written by policy_agent) or from disk as a fallback.
+    When configs is provided explicitly, uses that list directly.
+
+    Each item must have at least an "id" field matching a settingDefinitionId
+    in the policy settings tree.
+
+    Returns:
+      {
+        "found":   [{config, policy_name, policy_id}, ...],
+        "missing": [config, ...]
+      }
+    """
+    if not configs:
+        files = runtime.state.get("files", {})
+        file_entry = files.get("/policy_results.json") or files.get("policy_results.json")
+        if file_entry is not None:
+            if isinstance(file_entry, dict):
+                raw = file_entry.get("content", [])
+                content_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
+            else:
+                content_str = str(file_entry)
+            data = json.loads(content_str)
+        else:
+            disk_path = os.path.join(os.path.dirname(__file__), "policy_results.json")
+            try:
+                with open(disk_path) as f:
+                    data = json.load(f)
+            except FileNotFoundError:
+                return json.dumps({"error": "policy_results.json not found. Run policy_agent first."})
+
+        # PolicyAgentResults returns {"settings": [...]}; support flat list too
+        settings = data.get("settings", data) if isinstance(data, dict) else data
+        configs = settings
+
+    path = os.path.join(
+        os.path.dirname(__file__), "../configurations/policies_and_settings_expand.json"
+    )
+    with open(path) as f:
+        policies = json.load(f)
+
+    def _collect_ids(instance: dict, out: set) -> None:
+        sid = instance.get("settingDefinitionId")
+        if sid:
+            out.add(sid)
+        for val in instance.values():
+            if isinstance(val, dict):
+                _collect_ids(val, out)
+            elif isinstance(val, list):
+                for item in val:
+                    if isinstance(item, dict):
+                        _collect_ids(item, out)
+
+    # Build map: settingDefinitionId → list of {policy_name, policy_id}
+    id_to_policies: dict[str, list[dict]] = {}
+    for policy in policies:
+        policy_info = {"policy_name": policy.get("name", ""), "policy_id": policy.get("id", "")}
+        setting_ids: set[str] = set()
+        for setting in policy.get("settings", []):
+            _collect_ids(setting.get("settingInstance", {}), setting_ids)
+        for sid in setting_ids:
+            id_to_policies.setdefault(sid, []).append(policy_info)
+
+    found = []
+    missing = []
+    for config in configs:
+        if hasattr(config, "id"):
+            config_id = config.id
+            config_dict = config.model_dump() if hasattr(config, "model_dump") else vars(config)
+        elif isinstance(config, dict):
+            config_id = config.get("id", "")
+            config_dict = config
+        else:
+            # LLM passed a raw string (the setting definition ID itself)
+            config_id = str(config)
+            config_dict = {"id": config_id}
+        matches = id_to_policies.get(config_id)
+        if matches:
+            for m in matches:
+                found.append({**m, "config": config_dict})
+        else:
+            missing.append(config_dict)
+
+    result = {"found": found, "missing": missing}
+    relevant_configs_path = os.path.join(os.path.dirname(__file__), "relevant_configs.json")
+    with open(relevant_configs_path, "w") as f:
+        json.dump(result, f, indent=2)
+    return json.dumps(result, indent=2)
+
+
+@tool
+def analyze_configs() -> str:
+    """Retrieve and explain all currently configured security policies in the tenant.
+    Returns structured JSON with every setting name, configured value, and available
+    options for each policy."""
 
     path = os.path.join(os.path.dirname(__file__), "../configurations", "policies_and_settings_expand.json")
     with open(path, "r") as f:
@@ -171,8 +267,12 @@ config_agent = {
         "in the tenant — never answer from memory.\n\n"
 
         "## Tool selection\n"
+        "- To check which policy settings are configured in the tenant: "
+        "call find_configs_in_policies() with NO arguments — it reads "
+        "policy_results.json written by policy_agent automatically. "
+        "Return 'found' items as CONFIGURED and 'missing' items as NOT CONFIGURED.\n"
         "- If the user asks for an OVERVIEW of all policies or wants to know "
-        "what policies exist: call analyze_configs and return explanations for each configuration.\n"
+        "what policies exist: call analyze_configs.\n"
 
         "## When explaining a policy\n"
         "For each setting in the returned JSON:\n"
@@ -188,11 +288,17 @@ config_agent = {
         "## Output structure\n"
         "Group settings by category (e.g. BitLocker, Firewall, Defender). "
         "End with a one-paragraph security posture summary. "
-        "Be precise but avoid unexplained acronyms."
+        "Be precise but avoid unexplained acronyms.\n\n"
+
+        "## Saving output\n"
+        "After calling find_configs_in_policies(), call write_file with:\n"
+        "  path: 'relevant_configs.json'\n"
+        "  content: the raw JSON string returned by find_configs_in_policies\n"
+        "Do this before summarising the results."
     ),
-    "tools": [analyze_configs],
+    "tools": [find_configs_in_policies, analyze_configs],
 }
 
 """if __name__ == "__main__":
-    result = analyze_configs.invoke("Explain all currently configured policies and settings in the tenant, with a focus on security implications.")
+    result = analyze_configs.invoke()
     print(result)"""
