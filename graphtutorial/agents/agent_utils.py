@@ -17,64 +17,83 @@ from rich.text import Text
 
 console = Console()
 
-def stream_agent_v2(agent, query, config=None):
-    """Stream a deep agent run with subagent labeling, v2 format."""
+def stream_agent_v2(agent, query, config=None, on_interrupt=None):
+    """Stream a deep agent run with subagent labeling, v2 format.
+
+    Args:
+        on_interrupt: Optional callable(interrupt_values) -> Command.
+                      Called when the graph pauses at an interrupt; should
+                      return a Command(resume=...) to continue.
+    """
     active_subagents = {}  # tool_call_id -> {type, status}
     final_state = None
+    pending = query
 
-    for chunk in agent.stream(
-        query,
-        stream_mode=["updates", "values"],
-        subgraphs=True,
-        version="v2",
-        config=config,
-    ):
-        ns = chunk["ns"]
-        is_subagent = any(s.startswith("tools:") for s in ns)
-        source = "main" if not is_subagent else next(
-            s for s in ns if s.startswith("tools:")
-        )
+    while True:
+        interrupted = False
 
-        if chunk["type"] == "values":
-            final_state = chunk["data"]
-            continue
+        for chunk in agent.stream(
+            pending,
+            stream_mode=["updates", "values"],
+            subgraphs=True,
+            version="v2",
+            config=config,
+        ):
+            ns = chunk["ns"]
+            is_subagent = any(s.startswith("tools:") for s in ns)
+            source = "main" if not is_subagent else next(
+                s for s in ns if s.startswith("tools:")
+            )
 
-        if chunk["type"] != "updates":
-            continue
+            if chunk["type"] == "values":
+                final_state = chunk["data"]
+                continue
 
-        for node_name, data in chunk["data"].items():
-            # Track subagent lifecycle from the main agent's perspective
-            if not is_subagent and node_name == "model_request":
-                for msg in (data or {}).get("messages", []):
-                    for tc in getattr(msg, "tool_calls", []) or []:
-                        if tc["name"] == "task":
-                            sub_type = tc["args"].get("subagent_type", "unknown")
-                            active_subagents[tc["id"]] = {
-                                "type": sub_type,
-                                "status": "pending",
-                            }
-                            console.print(
-                                f"[bold cyan]→ Delegating to {sub_type}[/]: "
-                                f"{tc['args'].get('description', '')[:120]}"
-                            )
+            if chunk["type"] != "updates":
+                continue
 
-            if not is_subagent and node_name == "tools":
-                for msg in (data or {}).get("messages", []):
-                    if getattr(msg, "type", None) == "tool":
-                        sub = active_subagents.get(getattr(msg, "tool_call_id", None))
-                        if sub:
-                            sub["status"] = "complete"
-                            console.print(
-                                f"[bold green]✓ {sub['type']} returned[/]"
-                            )
+            if "__interrupt__" in chunk["data"]:
+                interrupted = True
+                if on_interrupt:
+                    pending = on_interrupt(chunk["data"]["__interrupt__"])
+                break
 
-            # Print messages (full length) labeled by source
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    if "messages" in key and isinstance(value, list) and value:
-                        label = source if is_subagent else "main"
-                        console.print(f"[dim]── {label} / {node_name} ──[/]")
-                        format_messages(value)
+            for node_name, data in chunk["data"].items():
+                # Track subagent lifecycle from the main agent's perspective
+                if not is_subagent and node_name == "model_request":
+                    for msg in (data or {}).get("messages", []):
+                        for tc in getattr(msg, "tool_calls", []) or []:
+                            if tc["name"] == "task":
+                                sub_type = tc["args"].get("subagent_type", "unknown")
+                                active_subagents[tc["id"]] = {
+                                    "type": sub_type,
+                                    "status": "pending",
+                                }
+                                console.print(
+                                    f"[bold cyan]→ Delegating to {sub_type}[/]: "
+                                    f"{tc['args'].get('description', '')[:120]}"
+                                )
+
+                if not is_subagent and node_name == "tools":
+                    for msg in (data or {}).get("messages", []):
+                        if getattr(msg, "type", None) == "tool":
+                            sub = active_subagents.get(getattr(msg, "tool_call_id", None))
+                            if sub:
+                                sub["status"] = "complete"
+                                console.print(
+                                    f"[bold green]✓ {sub['type']} returned[/]"
+                                )
+
+                # Print messages (full length) labeled by source
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        if "messages" in key and isinstance(value, list) and value:
+                            label = source if is_subagent else "main"
+                            console.print(f"[dim]── {label} / {node_name} ──[/]")
+                            format_messages(value)
+
+        if not interrupted:
+            break
 
     return final_state
 
@@ -114,20 +133,56 @@ def format_message_content(message):
     return "\n".join(parts)
 
 
+def _summarize_tool_content(raw: str) -> str:
+    """Turn a raw tool result string into a readable summary."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        # Not JSON — truncate plain text
+        return raw[:500] + ("..." if len(raw) > 500 else "")
+
+    if isinstance(data, list):
+        total = len(data)
+        lines = [f"[{total} items]"]
+        for item in data[:5]:
+            if isinstance(item, dict):
+                status = item.get("status", "")
+                cis_id = item.get("cis_id", "")
+                title = item.get("cis_title", item.get("name", str(item)))[:80]
+                lines.append(f"  [{cis_id}] {title}  → {status}")
+            else:
+                lines.append(f"  {str(item)[:100]}")
+        if total > 5:
+            lines.append(f"  ... and {total - 5} more")
+        return "\n".join(lines)
+
+    if isinstance(data, dict):
+        keys = list(data.keys())
+        preview = json.dumps({k: data[k] for k in keys[:6]}, indent=2, ensure_ascii=False)
+        suffix = f"\n  ... ({len(keys) - 6} more keys)" if len(keys) > 6 else ""
+        return preview[:800] + suffix
+
+    return str(data)[:500]
+
+
 def format_messages(messages):
     """Format and display a list of messages with Rich formatting."""
     for m in messages:
         msg_type = m.__class__.__name__.replace("Message", "")
-        content = format_message_content(m)
 
-        if msg_type == "Human":
-            console.print(Panel(content, title="🧑 Human", border_style="blue"))
-        elif msg_type == "Ai":
-            console.print(Panel(content, title="🤖 Assistant", border_style="green"))
-        elif msg_type == "Tool":
-            console.print(Panel(content, title="🔧 Tool Output", border_style="yellow"))
+        if msg_type == "Tool":
+            raw = m.content if isinstance(m.content, str) else str(m.content)
+            tool_name = getattr(m, "name", "tool")
+            summary = _summarize_tool_content(raw)
+            console.print(Panel(summary, title=f"🔧 Tool Result: {tool_name}", border_style="yellow"))
         else:
-            console.print(Panel(content, title=f"📝 {msg_type}", border_style="white"))
+            content = format_message_content(m)
+            if msg_type == "Human":
+                console.print(Panel(content, title="🧑 Human", border_style="blue"))
+            elif msg_type == "Ai":
+                console.print(Panel(content, title="🤖 Assistant", border_style="green"))
+            else:
+                console.print(Panel(content, title=f"📝 {msg_type}", border_style="white"))
 
 
 def format_message(messages):
