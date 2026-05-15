@@ -1,12 +1,15 @@
+from deepagents import create_deep_agent
 from langchain.chat_models import init_chat_model
-from langchain.tools import tool
+from langchain.tools import tool, ToolRuntime
 import json
 import os
 from dotenv import load_dotenv
+import logging
+
 
 load_dotenv()
 
-OLLAMA_MODEL = "minimax-m2.5:cloud"
+OLLAMA_MODEL = "mistral-nemo:latest"
 OPENAI_API_MODEL = "gpt-5.4-nano-2026-03-17"
 
 # Initialize the model
@@ -20,6 +23,96 @@ model = init_chat_model(model=OPENAI_API_MODEL, model_provider="openai", tempera
     client_kwargs={"headers": {"Authorization": f"Bearer {os.getenv('OLLAMA_API_KEY')}"}},
     temperature=0.0,
 ) """
+
+logger = logging.getLogger(__name__)
+
+logging.basicConfig(
+    level=logging.INFO, 
+    format="%(asctime)s [%(levelname)s] %(message)s", 
+    handlers=[
+        logging.FileHandler("agent.log", mode='w'),  # overwrite log file on each run
+    ],)
+
+
+import time
+from contextvars import ContextVar
+from langchain.agents.middleware import before_model, after_model, wrap_tool_call
+
+_start = ContextVar("model_start", default=None)
+
+@before_model
+def log_before_model(state, runtime):
+    _start.set(time.time())
+    return None
+
+@after_model
+def log_after_model(state, runtime):
+    started = _start.get()
+    elapsed = time.time() - started if started else 0
+    last_msg = state["messages"][-1]
+    
+    tool_calls = getattr(last_msg, "tool_calls", None) or []
+    usage = getattr(last_msg, "usage_metadata", None) or {}
+    
+    content = getattr(last_msg, "content", "") or ""
+    logger.info(
+        "← Model call done in %.2fs | tokens=%s | tool_calls=%s\n%s",
+        elapsed,
+        f"{usage.get('input_tokens', '?')}→{usage.get('output_tokens', '?')}",
+        [tc["name"] for tc in tool_calls] if tool_calls else "none",
+        content[:4000] + ("..." if len(content) > 4000 else ""),
+    )
+    return None
+
+
+def log_chunk(chunk: dict) -> None:
+    if not isinstance(chunk, dict):
+        logger.info("Chunk: %s", str(chunk)[:1000])
+        return
+
+    for node, payload in chunk.items():
+        if payload is None:
+            logger.info("[%s] (no output)", node)
+            continue
+
+        # Payload might be an Overwrite/Append wrapper, a dict, or something else
+        if not isinstance(payload, dict):
+            logger.info("[%s] %s", node, str(payload)[:1000])
+            continue
+
+        # Drop noisy keys
+        payload = {k: v for k, v in payload.items() if k != "files"}
+
+        messages = payload.get("messages")
+        if messages is None:
+            # No messages field — just log keys touched
+            logger.info("[%s] keys=%s", node, list(payload.keys()))
+            continue
+
+        # messages might also be an Overwrite wrapper, not a list
+        if not isinstance(messages, list):
+            logger.info("[%s] messages=%s", node, str(messages)[:300])
+            continue
+
+        for msg in messages:
+            role = type(msg).__name__
+            content = getattr(msg, "content", "")
+            if not isinstance(content, str):
+                content = str(content)
+            preview = content[:300] + ("..." if len(content) > 300 else "")
+            logger.info("[%s] %s: %s", node, role, preview)
+
+
+@wrap_tool_call
+def tool_logger(request, handler):
+    name = request.tool_call["name"]
+    args = request.tool_call["args"]
+    logger.info("Tool call: %s args=%s", name, args)
+    result = handler(request)
+    content = result.content if hasattr(result, "content") else str(result)
+    truncated = content[:300] + ("..." if len(content) > 300 else "")
+    logger.info("Tool result: %s", truncated)
+    return result
 
 def _collect_settings(instance: dict, result: list[dict]) -> None:
     """Recursively extract every leaf setting from an Intune settingInstance tree."""
@@ -174,28 +267,199 @@ def compare_to_cis_benchmark(query: str) -> str:
     }, indent=2)
 
 @tool
-def compare_relevant_settings_to_cis_benchmark(settings_to_check: list[dict]) -> str:
-    """Compare a list of configured tenant settings against CIS benchmarks.
-    
-    Takes the output of tenant_policy_agent (configured settings relevant to
-    the current query) and checks each one against the pre-built CIS-to-Intune
-    mapping. Settings not covered by any CIS benchmark are marked
-    not_in_benchmark; settings marked as Manual in CIS are flagged for human
-    review rather than automatic verification.
-    
-    Args:
-        settings_to_check: A list of configured settings (from
-            tenant_policy_agent). Each item must contain:
-              - id: setting definition ID
-              - configured_value: current configured value in tenant
-              - configured_value_label (optional): human-readable label
-              - name (optional): setting display name
-              - policy_name (optional): policy that configures it
-              - policy_id (optional): policy ID
-    
+def compare_relevant_settings_to_benchmark(runtime: ToolRuntime) -> str:
+    """Compare the tenant's relevant configured settings against CIS benchmarks.
+
+    Reads relevant_configs.json written by config_agent, extracts the 'found'
+    settings list, and checks each one against the CIS benchmark data.
+    Settings not covered by any CIS benchmark are marked not_in_benchmark;
+    settings marked as Manual in CIS are flagged for human review.
+    """
+    # Try virtual filesystem first
+    files = runtime.state.get("files", {})
+    file_entry = files.get("/relevant_configs.json") or files.get("relevant_configs.json")
+    if file_entry is not None:
+        if isinstance(file_entry, dict):
+            # Proper FileData: content is list[str] lines
+            raw = file_entry.get("content", [])
+            content_str = "\n".join(raw) if isinstance(raw, list) else raw
+        else:
+            # Raw string passed directly
+            content_str = str(file_entry)
+        relevant = json.loads(content_str)
+    else:
+        # Fall back to disk — find_configs_in_policies writes it there directly
+        disk_path = os.path.join(os.path.dirname(__file__), "relevant_configs.json")
+        try:
+            with open(disk_path) as f:
+                relevant = json.load(f)
+        except FileNotFoundError:
+            return "relevant_configs.json not found in virtual filesystem or on disk. Run config_agent first."
+
+    base = os.path.dirname(__file__)
+    cis_benchmark_path = os.path.join(
+        base, "../configurations/cis_benchmarks/matched_all_level1.json"
+    )
+    with open(cis_benchmark_path) as f:
+        cis_data = json.load(f)       
+    # Support two formats:
+    #   {"found": [...], "missing": [...]}  — written by find_configs_in_policies
+    #   [...]                               — flat list of settings passed directly
+    if isinstance(relevant, list):
+        raw_items = relevant
+    else:
+        raw_items = relevant.get("found", [])
+
+    # Build settings_to_check, deduplicated by setting id
+    seen: set[str] = set()
+    settings_to_check: list[dict] = []
+    for item in raw_items:
+        config = item.get("config", item)
+        sid = config.get("id")
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        settings_to_check.append({
+            "id": sid,
+            "configured_value": config.get("configured_value"),
+            "configured_value_label": config.get("configured_value_label", ""),
+            "name": config.get("name", sid),
+            "policy_name": item.get("policy_name", config.get("policy_name", "")),
+            "policy_id": item.get("policy_id", config.get("policy_id", "")),
+        })
+
+    # Build CIS lookup index: setting_definition_id → {cis_item, benchmark_policy_name}
+    cis_index: dict[str, dict] = {}
+    for benchmark_policy in cis_data["policies"]:
+        policy_name = benchmark_policy["policy_metadata"]["intune_policy_name"]
+        for item in benchmark_policy.get("matched_configurations", []):
+            sid = item["setting_definition_id"]
+            if sid not in cis_index:
+                cis_index[sid] = {"cis_item": item, "benchmark_policy_name": policy_name}
+
+    results = []
+    for setting in settings_to_check:
+        sid = setting["id"]
+        configured_value = setting.get("configured_value")
+        configured_label = setting.get("configured_value_label", str(configured_value))
+        cis_match = cis_index.get(sid)
+        print(f"Checking setting {setting.get('name', sid)} (configured: {configured_label}) against CIS benchmark...")
+        print(f"CIS match found: {cis_match is not None}")
+        if cis_match is None:
+            results.append({
+                "setting_definition_id": sid,
+                "setting_name": setting.get("name", sid),
+                "configured_value": configured_value,
+                "configured_value_label": configured_label,
+                "policy_name": setting.get("policy_name", ""),
+                "status": "not_in_benchmark",
+                "cis_match": None,
+            })
+            continue
+
+        cis_item = cis_match["cis_item"]
+        rec = cis_item["cis_benchmark"]
+        cis_raw = cis_item["raw_value"]
+        operator = cis_item.get("operator", "==")
+        assessment_status = rec.get("Assessment Status", "")
+
+        if assessment_status == "Manual":
+            status = "manual_check_required"
+            compliant = None
+        else:
+            compliant = check_compliance(configured_value, cis_raw, operator)
+            status = "compliant" if compliant else "non_compliant"
+
+        results.append({
+            "setting_definition_id": sid,
+            "setting_name": setting.get("name", sid),
+            "configured_value": configured_value,
+            "configured_value_label": configured_label,
+            "policy_name": setting.get("policy_name", ""),
+            "status": status,
+            "cis_match": {
+                "cis_id": cis_item["cis_recommendation_number"],
+                "cis_title": rec["Title"],
+                "assessment_status": assessment_status,
+                "cis_reference_value": cis_raw,
+                "cis_reference_value_display": cis_item["configured_value"],
+                "operator": operator,
+                "rationale": rec.get("Rationale Statement", ""),
+                "impact": rec.get("Impact Statement", ""),
+                "remediation": rec.get("Remediation Procedure", ""),
+                "benchmark_policy": cis_match["benchmark_policy_name"],
+            },
+        })
+    print("Results:", json.dumps(results, indent=2))
+    summary = {
+        "total_checked": len(results),
+        "compliant": sum(1 for r in results if r["status"] == "compliant"),
+        "non_compliant": sum(1 for r in results if r["status"] == "non_compliant"),
+        "not_in_benchmark": sum(1 for r in results if r["status"] == "not_in_benchmark"),
+        "manual_check_required": sum(1 for r in results if r["status"] == "manual_check_required"),
+    }
+
+    return json.dumps({"summary": summary, "results": results}, indent=2)
+
+@tool
+def compare_relevant_settings_to_cis_benchmark(runtime: ToolRuntime, settings_to_check: list[dict] | None = None) -> str:
+    """Compare configured tenant settings against CIS benchmarks.
+
+    When settings_to_check is omitted (or empty), reads relevant_configs.json
+    from the virtual filesystem (or disk) automatically.  When settings_to_check
+    is provided explicitly, uses that list directly.
+
+    Each item in settings_to_check must contain:
+      - id: setting definition ID
+      - configured_value: current configured value in tenant
+      - configured_value_label (optional): human-readable label
+      - name (optional): setting display name
+      - policy_name (optional): policy that configures it
+      - policy_id (optional): policy ID
+
     Returns:
         JSON string with summary stats and per-setting compliance findings.
     """
+    if not settings_to_check:
+        # Try virtual filesystem first, then fall back to disk
+        files = runtime.state.get("files", {})
+        file_entry = files.get("/relevant_configs.json") or files.get("relevant_configs.json")
+        if file_entry is not None:
+            if isinstance(file_entry, dict):
+                raw = file_entry.get("content", [])
+                content_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
+            else:
+                content_str = str(file_entry)
+            relevant = json.loads(content_str)
+        else:
+            disk_path = os.path.join(os.path.dirname(__file__), "relevant_configs.json")
+            try:
+                with open(disk_path) as f:
+                    relevant = json.load(f)
+            except FileNotFoundError:
+                return json.dumps({"error": "relevant_configs.json not found. Run config_agent first."})
+
+        if isinstance(relevant, list):
+            raw_items = relevant
+        else:
+            raw_items = relevant.get("found", [])
+
+        seen: set[str] = set()
+        settings_to_check = []
+        for item in raw_items:
+            config = item.get("config", item)
+            sid = config.get("id")
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            settings_to_check.append({
+                "id": sid,
+                "configured_value": config.get("configured_value"),
+                "configured_value_label": config.get("configured_value_label", ""),
+                "name": config.get("name", sid),
+                "policy_name": item.get("policy_name", config.get("policy_name", "")),
+                "policy_id": item.get("policy_id", config.get("policy_id", "")),
+            })
     base = os.path.dirname(__file__)
     cis_benchmark_path = os.path.join(
         base,
@@ -302,8 +566,8 @@ def compare_relevant_settings_to_cis_benchmark(settings_to_check: list[dict]) ->
 cis_benchmark_agent = {
     "name": "cis_benchmark_agent",
     "description": (
-        "Retrieves and analyzes CIS benchmark policies. "
-        "Uses the compare_to_cis_benchmark tool to scan tenant policies for compliance with the CIS benchmark and produces a detailed report."
+        "Compares the tenant's relevant configured settings against CIS benchmarks. "
+        "Reads relevant_configs.json written by config_agent and produces a compliance report."
     ),
     "system_prompt": (
         "You are a CIS Benchmark compliance analyst for Microsoft Intune. "
@@ -311,352 +575,82 @@ cis_benchmark_agent = {
         "CIS Benchmark recommendations and report gaps clearly.\n\n"
 
         "## Steps\n"
-        "1. Call either compare_to_cis_benchmark or compare_relevant_settings_to_cis_benchmark with the query. \n"
-        "   - Use compare_to_cis_benchmark for a comprehensive scan of all tenant policies against the CIS benchmark. This is useful for an overall compliance assessment.\n"
-        "   - Use compare_relevant_settings_to_cis_benchmark to scan specific settings against the CIS benchmark. This is useful for targeted compliance checks.\n"
+        "1. Call compare_relevant_settings_to_benchmark() — it reads relevant_configs.json "
+        "automatically and returns compliance findings for those settings.\n"
+        "   If a file-not-found error occurs, fall back to compare_to_cis_benchmark(query=<description>) "
+        "for a full tenant scan.\n"
         "2. Present results as a compliance table with columns:\n"
         "   CIS ID | Benchmark Policy | Setting Name | Configured Value | "
         "   CIS Recommended | Status\n"
         "3. Use these status labels:\n"
         "   - COMPLIANT: configured value matches CIS recommendation\n"
         "   - NON-COMPLIANT: configured value deviates from recommendation\n"
-        "   - NOT CONFIGURED: setting is absent from all tenant policies\n"
-        "   - MANUAL CHECK REQUIRED: CIS marks this as a manual control that "
-        "cannot be verified automatically\n\n"
+        "   - NOT IN BENCHMARK: setting is not covered by CIS\n"
+        "   - MANUAL CHECK REQUIRED: CIS marks this as a manual control\n\n"
 
         "## For each NON-COMPLIANT setting\n"
         "- State the current value and what the CIS recommendation is.\n"
         "- State the CIS rationale for why this value matters.\n"
-        "- State the remediation path from the CIS benchmark data.\n"
-        "- Flag if changing this setting may affect dependent settings "
-        "(the supervisor will check interdependencies separately).\n\n"
-
-        "## For each NOT CONFIGURED setting\n"
-        "- Note that the setting is absent from all policies.\n"
-        "- State what value CIS recommends and why.\n"
-        "- This is higher priority than non-compliant — "
-        "the setting provides no protection at all.\n\n"
+        "- State the remediation path from the CIS benchmark data.\n\n"
 
         "## For each MANUAL CHECK REQUIRED setting\n"
         "- Note that this control cannot be verified programmatically.\n"
         "- State what CIS recommends and the audit procedure if available.\n\n"
 
         "## Important\n"
-        "Only use data from the compare_to_cis_benchmark or compare_relevant_settings_to_cis_benchmark tool output. "
-        "Do not generate remediation steps from your own knowledge. "
-        "If the tool output does not include a remediation path, "
-        "state that the remediation path was not available in the data."
+        "Only use data from tool output. "
+        "Do not generate remediation steps from your own knowledge."
     ),
-    "tools": [compare_to_cis_benchmark, compare_relevant_settings_to_cis_benchmark],
+    "tools": [compare_relevant_settings_to_benchmark, compare_to_cis_benchmark],
 }
 
+benchmark_agent = create_deep_agent(
+    middleware=[log_before_model, log_after_model, tool_logger],
+    system_prompt=(
+        "You are a CIS Benchmark compliance analyst for Microsoft Intune. "
+        "Your job is to compare the tenant's current configuration against "
+        "CIS Benchmark recommendations and report gaps clearly.\n\n"
+
+        "## Steps\n"
+        "1. Call compare_relevant_settings_to_benchmark() with NO arguments — "
+        "it reads relevant_configs.json from the virtual filesystem automatically.\n"
+        "   If a file-not-found error is returned, fall back to compare_to_cis_benchmark(query=<description>).\n"
+        "2. Present results as a compliance table with columns:\n"
+        "   CIS ID | Benchmark Policy | Setting Name | Configured Value | "
+        "   CIS Recommended | Status\n"
+        "3. Use these status labels:\n"
+        "   - COMPLIANT: configured value matches CIS recommendation\n"
+        "   - NON-COMPLIANT: configured value deviates from recommendation\n"
+        "   - NOT IN BENCHMARK: setting is not covered by CIS\n"
+        "   - MANUAL CHECK REQUIRED: CIS marks this as a manual control\n\n"
+
+        "## For each NON-COMPLIANT setting\n"
+        "- State the current value and what the CIS recommendation is.\n"
+        "- State the CIS rationale for why this value matters.\n"
+        "- State the remediation path from the CIS benchmark data.\n\n"
+
+        "## For each MANUAL CHECK REQUIRED setting\n"
+        "- Note that this control cannot be verified programmatically.\n"
+        "- State what CIS recommends and the audit procedure if available.\n\n"
+
+        "## Important\n"
+        "Only use data from tool output. "
+        "Do not generate remediation steps from your own knowledge."
+    ),
+    model=model,
+    tools=[compare_relevant_settings_to_benchmark, compare_to_cis_benchmark])
+
+def _file_data(path: str) -> dict:
+    """Wrap a file's content in the FileData format deepagents expects."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    with open(path) as f:
+        lines = f.read().splitlines()
+    return {"content": lines, "created_at": now, "modified_at": now}
+
 if __name__ == "__main__":
-    relevant_settings = [
-      {
-      "id": "device_vendor_msft_policy_config_credentialproviders_blockpicturepassword",
-      "name": "Turn off picture password sign-in",
-      "description": "This policy setting allows you to control whether a domain user can sign in using a picture password.\r\n\r\nIf you enable this policy setting, a domain user can't set up or sign in with a picture password. \r\n\r\nIf you disable or don't configure this policy setting, a domain user can set up and use a picture password.\r\n\r\nNote that the user's domain password will be cached in the system vault when using this feature.",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_credentialproviders_blockpicturepassword_1",
-      "configured_value_label": "Enabled",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - System - Restrictions [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "dcffa355-f249-4bf8-b386-6be7f5c1945f",
-      "available_options": [
-        "Disabled",
-        "Enabled"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving",
-      "name": "Do not allow passwords to be saved",
-      "description": "Controls whether passwords can be saved on this computer from Remote Desktop Connection.\r\n\r\nIf you enable this setting the password saving checkbox in Remote Desktop Connection will be disabled and users will no longer be able to save passwords. When a user opens an RDP file using Remote Desktop Connection and saves his settings, any password that previously existed in the RDP file will be deleted.\r\n\r\nIf you disable this setting or leave it not configured, the user will be able to save passwords using Remote Desktop Connection.",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving_1",
-      "configured_value_label": "Enabled",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "c4dc50cf-85bf-49ad-a4d7-c594a7096e98",
-      "available_options": [
-        "Disabled",
-        "Enabled"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_windowslogon_enablemprnotifications",
-      "name": "Configure the transmission of the user's password in the content of MPR notifications sent by winlogon.",
-      "description": "This policy controls whether the user's password is included in the content of MPR notifications sent by winlogon in the system.\r\n\r\nIf you disable this setting or do not configure it, winlogon sends MPR notifications with empty password fields of the user's authentication info.\r\n\r\nIf you enable this setting, winlogon sends MPR notifications containing the user's password in the authentication info.",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_windowslogon_enablemprnotifications_0",
-      "configured_value_label": "Disabled",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "c4dc50cf-85bf-49ad-a4d7-c594a7096e98",
-      "available_options": [
-        "Disabled",
-        "Enabled"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_localpoliciessecurityoptions_networksecurity_lanmanagerauthenticationlevel",
-      "name": "Network Security LAN Manager Authentication Level",
-      "description": "Network security LAN Manager authentication level  This security setting determines which challenge/response authentication protocol is used for network logons. This choice affects the level of authentication protocol used by clients, the level of session security negotiated, and the level of authentication accepted by servers as follows:  Send LM and NTLM responses: Clients use LM and NTLM authentication and never use NTLMv2 session security; domain controllers accept LM, NTLM, and NTLMv2 authentication.  Send LM and NTLM - use NTLMv2 session security if negotiated: Clients use LM and NTLM authentication and use NTLMv2 session security if the server supports it; domain controllers accept LM, NTLM, and NTLMv2 authentication.  Send NTLM response only: Clients use NTLM authentication only and use NTLMv2 session security if the server supports it; domain controllers accept LM, NTLM, and NTLMv2 authentication.  Send NTLMv2 response only: Clients use NTLMv2 authentication only and use NTLMv2 session security if the server supports it; domain controllers accept LM, NTLM, and NTLMv2 authentication.  Send NTLMv2 response only\\refuse LM: Clients use NTLMv2 authentication only and use NTLMv2 session security if the server supports it; domain controllers refuse LM (accept only NTLM and NTLMv2 authentication).  Send NTLMv2 response only\\refuse LM and NTLM: Clients use NTLMv2 authentication only and use NTLMv2 session security if the server supports it; domain controllers refuse LM and NTLM (accept only NTLMv2 authentication).  Important  This setting can affect the ability of computers running Windows 2000 Server, Windows 2000 Professional, Windows XP Professional, and the Windows Server 2003 family to communicate with computers running Windows NT 4.0 and earlier over the network. For example, at the time of this writing, computers running Windows NT 4.0 SP4 and earlier did not support NTLMv2. Computers running Windows 95 and Windows 98 did not support NTLM.  Default:  Windows 2000 and windows XP: send LM and NTLM responses  Windows Server 2003: Send NTLM response only  Windows Vista, Windows Server 2008, Windows 7, and Windows Server 2008 R2: Send NTLMv2 response only",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_localpoliciessecurityoptions_networksecurity_lanmanagerauthenticationlevel_5",
-      "configured_value_label": "Send NTLMv2 responses only. Refuse LM and NTLM",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "ADN - Add-on - Local Policies Security Options [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "972e07f3-be73-4195-9f9e-8f573c07ddcd",
-      "available_options": [
-        "Send LM and NTLM responses",
-        "Send LM and NTLM-use NTLMv2 session security if negotiated",
-        "Send LM and NTLM responses only",
-        "Send NTLMv2 responses only",
-        "Send NTLMv2 responses only. Refuse LM",
-        "Send NTLMv2 responses only. Refuse LM and NTLM"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_localpoliciessecurityoptions_networksecurity_minimumsessionsecurityforntlmsspbasedclients_537395200",
-      "name": "Network Security Minimum Session Security For NTLMSSP Based Clients",
-      "description": "Network security: Minimum session security for NTLM SSP based (including secure RPC) clients  This security setting allows a client to require the negotiation of 128-bit encryption and/or NTLMv2 session security. These values are dependent on the LAN Manager Authentication Level security setting value. The options are:  Require NTLMv2 session security: The connection will fail if NTLMv2 protocol is not negotiated. Require 128-bit encryption: The connection will fail if strong encryption (128-bit) is not negotiated.  Default:  Windows XP, Windows Vista, Windows 2000 Server, Windows Server 2003, and Windows Server 2008: No requirements.  Windows 7 and Windows Server 2008 R2: Require 128-bit encryption",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_localpoliciessecurityoptions_networksecurity_minimumsessionsecurityforntlmsspbasedclients_537395200",
-      "configured_value_label": "Require NTLM and 128-bit encryption",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - Local Policies Security Options [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "6af60625-fa62-4a37-b748-a21f24ae6d06",
-      "available_options": [
-        "None",
-        "Require NTLMv2 session security",
-        "Require 128-bit encryption",
-        "Require NTLM and 128-bit encryption"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_localpoliciessecurityoptions_networksecurity_minimumsessionsecurityforntlmsspbasedservers_537395200",
-      "name": "Network Security Minimum Session Security For NTLMSSP Based Servers",
-      "description": "Network security: Minimum session security for NTLM SSP based (including secure RPC) servers  This security setting allows a server to require the negotiation of 128-bit encryption and/or NTLMv2 session security. These values are dependent on the LAN Manager Authentication Level security setting value. The options are:  Require NTLMv2 session security: The connection will fail if message integrity is not negotiated. Require 128-bit encryption. The connection will fail if strong encryption (128-bit) is not negotiated.  Default:  Windows XP, Windows Vista, Windows 2000 Server, Windows Server 2003, and Windows Server 2008: No requirements.  Windows 7 and Windows Server 2008 R2: Require 128-bit encryption",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_localpoliciessecurityoptions_networksecurity_minimumsessionsecurityforntlmsspbasedservers_537395200",
-      "configured_value_label": "Require NTLM and 128-bit encryption",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - Local Policies Security Options [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "6af60625-fa62-4a37-b748-a21f24ae6d06",
-      "available_options": [
-        "None",
-        "Require NTLMv2 session security",
-        "Require 128-bit encryption",
-        "Require NTLM and 128-bit encryption"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_localpoliciessecurityoptions_microsoftnetworkclient_sendunencryptedpasswordtothirdpartysmbservers",
-      "name": "Microsoft Network Client Send Unencrypted Password To Third Party SMB Servers",
-      "description": "Microsoft network client: Send unencrypted password to connect to third-party SMB servers  If this security setting is enabled, the Server Message Block (SMB) redirector is allowed to send plaintext passwords to non-Microsoft SMB servers that do not support password encryption during authentication.  Sending unencrypted passwords is a security risk.  Default: Disabled.",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_localpoliciessecurityoptions_microsoftnetworkclient_sendunencryptedpasswordtothirdpartysmbservers_0",
-      "configured_value_label": "Disable",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - Local Policies Security Options [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "6af60625-fa62-4a37-b748-a21f24ae6d06",
-      "available_options": [
-        "Enable",
-        "Disable"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal",
-      "name": "Do not display the password reveal button",
-      "description": "This policy setting allows you to configure the display of the password reveal button in password entry user experiences.\r\n\r\nIf you enable this policy setting, the password reveal button will not be displayed after a user types a password in the password entry text box.\r\n\r\nIf you disable or do not configure this policy setting, the password reveal button will be displayed after a user types a password in the password entry text box.\r\n\r\nBy default, the password reveal button is displayed after a user types a password in the password entry text box. To display the password, click the password reveal button.\r\n\r\nThe policy applies to all Windows components and applications that use the Windows system controls, including Internet Explorer.",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal_1",
-      "configured_value_label": "Enabled",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "c4dc50cf-85bf-49ad-a4d7-c594a7096e98",
-      "available_options": [
-        "Disabled",
-        "Enabled"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
-      "name": "Device Password Expiration",
-      "description": "Specifies when the password expires (in days). 0 - Passwords do not expire.",
-      "platform": "windows10",
-      "type": "simple",
-      "configured_value": 500,
-      "configured_value_label": "500",
-      "parent_setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-      "parent_chain": [
-        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
-      ],
-      "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
-      "dependency_condition": {
-        "parent_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-        "parent_chosen_label": "Enabled",
-        "active_unknown": "true"
-      }
-    },
-    {
-      "id": "device_vendor_msft_policy_config_devicelock_devicepasswordhistory",
-      "name": "Device Password History",
-      "description": "Specifies how many passwords can be stored in the history that can\u2019t be used.",
-      "platform": "windows10",
-      "type": "simple",
-      "configured_value": 12,
-      "configured_value_label": "12",
-      "parent_setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-      "parent_chain": [
-        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
-      ],
-      "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
-      "dependency_condition": {
-        "parent_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-        "parent_chosen_label": "Enabled",
-        "active_unknown": "true"
-      }
-    },
-    {
-      "id": "device_vendor_msft_policy_config_devicelock_maxdevicepasswordfailedattempts",
-      "name": "Max Device Password Failed Attempts",
-      "description": "On a desktop, when the user reaches the value set by this policy, it is not wiped. Instead, the desktop is put on BitLocker recovery mode, which makes the data inaccessible but recoverable. If BitLocker is not enabled, then the policy cannot be enforced.",
-      "platform": "windows10",
-      "type": "simple",
-      "configured_value": 20,
-      "configured_value_label": "20",
-      "parent_setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-      "parent_chain": [
-        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
-      ],
-      "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
-      "dependency_condition": {
-        "parent_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-        "parent_chosen_label": "Enabled",
-        "active_unknown": "true"
-      }
-    },
-    {
-      "id": "device_vendor_msft_policy_config_devicelock_maxinactivitytimedevicelock",
-      "name": "Max Inactivity Time Device Lock",
-      "description": "Specifies the maximum amount of time (in minutes) allowed after the device is idle that will cause the device to become PIN or password locked. Users can select any existing timeout value less than the specified maximum time in the Settings app. 0 - No timeout is defined",
-      "platform": "windows10",
-      "type": "simple",
-      "configured_value": 15,
-      "configured_value_label": "15",
-      "parent_setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-      "parent_chain": [
-        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
-      ],
-      "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
-      "dependency_condition": {
-        "parent_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-        "parent_chosen_label": "Enabled",
-        "active_unknown": "true"
-      }
-    },
-    {
-      "id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordlength",
-      "name": "Min Device Password Length",
-      "description": "Specifies the minimum number or characters required in the PIN or password.",
-      "platform": "windows10",
-      "type": "simple",
-      "configured_value": 3,
-      "configured_value_label": "3",
-      "parent_setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-      "parent_chain": [
-        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
-      ],
-      "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
-      "dependency_condition": {
-        "parent_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-        "parent_chosen_label": "Enabled",
-        "active_unknown": "true"
-      }
-    },
-    {
-      "id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters",
-      "name": "Min Device Password Complex Characters",
-      "description": "The number of complex element types (uppercase and lowercase letters, numbers, and punctuation) required for a strong PIN or password.",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters_2",
-      "configured_value_label": "Digits and lowercase letters are required",
-      "parent_setting_id": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired",
-      "parent_chain": [
-        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
-        "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired"
-      ],
-      "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
-      "available_options": [
-        "Digits only",
-        "Digits and lowercase letters are required",
-        "Digits lowercase letters and uppercase letters are required. Not supported in desktop Microsoft accounts and domain accounts",
-        "Digits lowercase letters uppercase letters and special characters are required. Not supported in desktop"
-      ],
-      "dependency_condition": {
-        "parent_id": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired",
-        "parent_chosen_label": "Password or Alphanumeric PIN required.",
-        "active_unknown": "true"
-      }
-    },
-    {
-      "id": "device_vendor_msft_bitlocker_systemdrivesrequirestartupauthentication",
-      "name": "Require additional authentication at startup",
-      "description": "This policy setting allows you to configure whether BitLocker requires additional authentication each time the computer starts and whether you are using BitLocker with or without a Trusted Platform Module (TPM). This policy setting is applied when you turn on BitLocker.\r\n\r\nNote: Only one of the additional authentication options can be required at startup, otherwise a policy error occurs.\r\n\r\nIf you want to use BitLocker on a computer without a TPM, select the \"Allow BitLocker without a compatible TPM\" check box. In this mode either a password or a USB drive is required for start-up. When using a startup key, the key information used to encrypt the drive is stored on the USB drive, creating a USB key. When the USB key is inserted the access to the drive is authenticated and the drive is accessible. If the USB key is lost or unavailable or if you have forgotten the password then you will need to use one of the BitLocker recovery options to access the drive.\r\n\r\nOn a computer with a compatible TPM, four types of authentication methods can be used at startup to provide added protection for encrypted data. When the computer starts, it can use only the TPM for authentication, or it can also require insertion of a USB flash drive containing a startup key, the entry of a 6-digit to 20-digit personal identification number (PIN), or both.\r\n\r\nIf you enable this policy setting, users can configure advanced startup options in the BitLocker setup wizard.\r\n\r\nIf you disable or do not configure this policy setting, users can configure only basic options on computers with a TPM.\r\n\r\nNote: If you want to require the use of a startup PIN and a USB flash drive, you must configure BitLocker settings using the command-line tool manage-bde instead of the BitLocker Drive Encryption setup wizard.\r\n\r\n",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_bitlocker_systemdrivesrequirestartupauthentication_1",
-      "configured_value_label": "Enabled",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - BitLocker - Operating System Drives [BL] - Windows 11 - v4.0.0.0",
-      "policy_id": "baf9b2f7-84ba-4326-8700-47b49029515f",
-      "available_options": [
-        "Disabled",
-        "Enabled"
-      ]
-    },
-    {
-      "id": "device_vendor_msft_policy_config_windowslogon_allowautomaticrestartsignon",
-      "name": "Sign-in and lock last interactive user automatically after a restart",
-      "description": "This policy setting controls whether a device will automatically sign in and lock the last interactive user after the system restarts or after a shutdown and cold boot.\r\n\r\nThis only occurs if the last interactive user didn\u2019t sign out before the restart or shutdown.\u200b\r\n\r\nIf the device is joined to Active Directory or Azure Active Directory, this policy only applies to Windows Update restarts. Otherwise, this will apply to both Windows Update restarts and user-initiated restarts and shutdowns.\u200b\r\n\r\nIf you don\u2019t configure this policy setting, it is enabled by default. When the policy is enabled, the user is automatically signed in and the session is automatically locked with all lock screen apps configured for that user after the device boots.\u200b\r\n\r\nAfter enabling this policy, you can configure its settings through the ConfigAutomaticRestartSignOn policy, which configures the mode of automatically signing in and locking the last interactive user after a restart or cold boot\u200b.\r\n\r\nIf you disable this policy setting, the device does not configure automatic sign in. The user\u2019s lock screen apps are not restarted after the system restarts.",
-      "platform": "windows10",
-      "type": "choice",
-      "configured_value": "device_vendor_msft_policy_config_windowslogon_allowautomaticrestartsignon_0",
-      "configured_value_label": "Disabled",
-      "parent_setting_id": "null",
-      "parent_chain": [],
-      "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
-      "policy_id": "c4dc50cf-85bf-49ad-a4d7-c594a7096e98",
-      "available_options": [
-        "Disabled",
-        "Enabled"
-      ]
-    }
-  ]
-    result = compare_relevant_settings_to_cis_benchmark.invoke({"settings_to_check": relevant_settings})
-    print(result)
+    result = benchmark_agent.invoke({
+        "messages": [{"role": "user", "content": "What are the CIS benchmark compliance gaps for the following settings?"}],
+        "files": {"relevant_configs.json": _file_data(os.path.join(os.path.dirname(__file__), "relevant_configs.json"))},
+    })
+    print(result["messages"][-1]["content"])
