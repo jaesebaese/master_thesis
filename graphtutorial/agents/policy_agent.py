@@ -125,7 +125,7 @@ def _get_intune_collection():
 
 
 @tool
-def policy_analyzer(query: str) -> str:
+def policy_analyzer(runtime: ToolRuntime, security_policy: str, platform: str ) -> str:
     """Search the Intune settings vector database for configuration settings
     that are semantically similar to the query.  Returns the top matches with
     their id, name, description, and platform.
@@ -135,29 +135,75 @@ def policy_analyzer(query: str) -> str:
                 e.g. 'BitLocker recovery password options' or
                'block executable content from email'.
     """
+
+    files = runtime.state.get("files", {})
+    
+    file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
+    print(file_entry)
+    if file_entry is not None:
+        if isinstance(file_entry, dict):
+            raw = file_entry.get("content", [])
+            policy_file = "\n\n".join(raw) if isinstance(raw, list) else str(raw)
+        else:
+            policy_file = str(file_entry)
+    elif os.path.join(os.path.dirname(__file__), "security_policy.txt"):
+        print("FILE NOT FOUND")
+        #TODO: add the file in the local path
+        disk_path = os.path.join(os.path.dirname(__file__), "security_policy.txt")
+        try:
+            with open(disk_path) as f:
+                policy_file = f.read()
+        except FileNotFoundError:
+            return json.dumps({
+                "settings": [],
+                "error": "security_policy.txt not found in virtual filesystem or on disk.",
+            })
+    else:
+        policy_file = security_policy
+            
+    _PLATFORM_MAP = {
+        "windows": "windows10",
+        "windows10": "windows10",
+        "windows 10": "windows10",
+        "windows 11": "windows10",
+        "windows11": "windows10",
+        "macos": "macOS",
+        "mac": "macOS",
+        "ios": "iOS",
+        "android": "android",
+    }
+    normalized_platform = _PLATFORM_MAP.get(platform.lower().strip(), platform) if platform else None
+
     collection = _get_intune_collection()
+    where = {"platform": normalized_platform} if normalized_platform else None
 
-    results = collection.query(
-        query_texts=[query],
-        n_results=10,
-        include=["metadatas", "distances", "documents"],
-    )
+    paragraphs = [p.strip() for p in policy_file.split("\n\n") if len(p.strip()) > 20]
+    if not paragraphs:
+        paragraphs = [policy_file.strip()]
 
-    hits = []
-    for meta, distance, _ in zip(
-        results["metadatas"][0],
-        results["distances"][0],
-        results["documents"][0],
-    ):
-        hits.append({
-            "id": meta.get("id"),
-            "name": meta.get("name"),
-            "description": meta.get("description"),
-            "platform": meta.get("platform"),
-            "similarity_score": round(1 - distance, 4),
-        })
-    hits = [h for h in hits if h["similarity_score"] > 0.5]
-    print("System prompt:" + policy_agent["system_prompt"])
+    best: dict[str, dict] = {}
+
+    for para in paragraphs:
+        results = collection.query(
+            query_texts=[para],
+            n_results=10,
+            where=where,
+            include=["metadatas", "distances", "documents"],
+        )
+        for meta, distance in zip(results["metadatas"][0], results["distances"][0]):
+            score = round(1 - distance, 4)
+            sid = meta.get("id")
+            if score > 0.5 and (sid not in best or score > best[sid]["similarity_score"]):
+                best[sid] = {
+                    "id": sid,
+                    "name": meta.get("name"),
+                    "description": meta.get("description"),
+                    "platform": meta.get("platform"),
+                    "similarity_score": score,
+                    "matched_paragraph": para,
+                }
+
+    hits = sorted(best.values(), key=lambda h: h["similarity_score"], reverse=True)
     return json.dumps(hits, indent=2)
 
 """ @tool
@@ -194,7 +240,7 @@ def policy_requirement_extractor(policy_input: str) -> str:
             {
             "requirement_id": "REQ-001",
             "source_text": "Exact sentence or clause from the policy text.",
-            "security_domain": "password_policy | encryption | firewall | antivirus | authentication | update_management | device_compliance | data_protection | access_control | other",
+            "security_domain": "security_policy | encryption | firewall | antivirus | authentication | update_management | device_compliance | data_protection | access_control | other",
             "control_intent": "short_snake_case_description_of_the_control_goal",
             "expected_value": "specific required value, boolean, number, or null if not specified",
             "expected_unit": "characters | days | attempts | versions | enabled_disabled | other | null",
@@ -428,7 +474,7 @@ def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | 
     """Identify which currently-configured Intune settings are relevant to
     a security policy or topic.
 
-    When policy_input is omitted, reads the policy from password_policy.txt
+    When policy_input is omitted, reads the policy from security_policy.txt
     in the virtual filesystem (or from disk as a fallback). When policy_input
     is provided, uses it directly.
 
@@ -438,7 +484,7 @@ def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | 
     """
     if not policy_input:
         files = runtime.state.get("files", {})
-        file_entry = files.get("/password_policy.txt") or files.get("password_policy.txt")
+        file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
         if file_entry is not None:
             if isinstance(file_entry, dict):
                 raw = file_entry.get("content", [])
@@ -446,14 +492,14 @@ def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | 
             else:
                 policy_input = str(file_entry)
         else:
-            disk_path = os.path.join(os.path.dirname(__file__), "password_policy.txt")
+            disk_path = os.path.join(os.path.dirname(__file__), "security_policy.txt")
             try:
                 with open(disk_path) as f:
                     policy_input = f.read()
             except FileNotFoundError:
                 return json.dumps({
                     "settings": [],
-                    "error": "password_policy.txt not found in virtual filesystem or on disk.",
+                    "error": "security_policy.txt not found in virtual filesystem or on disk.",
                 })
 
     with open(TENANT_CONFIG_PATH) as f:
@@ -502,35 +548,19 @@ policy_agent = {
     ),
     "system_prompt": ("""\
 You are an Intune settings discovery specialist. Your role is to identify which
-of the tenant's CURRENTLY CONFIGURED Intune settings are relevant to a given
-security policy or topic.
-
-You will receive:
-1. A security policy (free text).
-2. A JSON array of settings currently configured in the tenant. Each entry has
-   at minimum an id, name, description, platform, and configured value.
+Intune catalog settings are relevant to a given security policy or topic.
 
 Your task:
-1. Call find_relevant_configured_settings() with NO arguments — it reads
-   password_policy.txt automatically and returns the relevant settings.
+1. Call policy_analyzer() to find intune policies that are linked to 
+   the security policy provided by the user.
 2. Call write_file with:
      path: 'policy_results.json'
-     content: the raw JSON string returned by find_relevant_configured_settings
+     content: the exact JSON string returned by policy_analyzer
    Do this before summarising the results.
-
-Return ONLY the settings from the tenant array that are relevant to the policy.
-Do not invent settings. Preserve every field verbatim — id, name, description,
-platform, configured value — exactly as given.
-
-Rules:
-- Use only IDs that appear in the input.
-- If no settings are relevant, return {"settings": []}.
-- Do not add explanations outside the JSON.
-- The output must be parseable by json.loads().
-"""       
+3. Return the result from policy_analyzer as your final response.
+"""
     ),
-    "tools": [find_relevant_configured_settings],
-    "response_format": PolicyAgentResults
+    "tools": [policy_analyzer],
 }
 
 
@@ -538,33 +568,46 @@ if __name__ == "__main__":
     build_intune_vector_db(force_rebuild=False)
     policy =""" 
 All passwords must be created in a way that ensures they are difficult to guess or compromise. Users must ensure that passwords are unique to each system and are not reused across different services. Passwords must remain confidential at all times and must not be shared with any other individual, including IT personnel. Furthermore, passwords must not be stored in plain text, whether digitally or physically, unless they are protected by approved secure storage mechanisms such as password managers.
+
 4.2 Complexity Requirements
 Passwords must meet a minimum length of twelve characters and include a combination of uppercase letters, lowercase letters, numbers, and special characters. Users must avoid using easily guessable information such as names, usernames, dates of birth, or common words found in dictionaries. The intent is to ensure that passwords are resistant to brute-force and dictionary-based attacks.
+
 4.3 Passphrases
 Where systems allow, users are encouraged to create passphrases instead of traditional passwords. A passphrase should consist of at least sixteen characters and be composed of multiple unrelated words combined with numbers or special characters. This approach increases memorability while maintaining a high level of security.
+
 4.4 Password Reuse
 To reduce the risk of compromise, users must not reuse previous passwords. The organization will enforce controls to prevent the reuse of at least the last ten passwords. In addition, users should ensure that passwords used within the organization are not reused for personal accounts or external services.
+
 4.5 Password Expiry
 Passwords must be changed periodically to reduce the risk of long-term exposure. Standard user accounts must update their passwords at least every ninety days, while privileged accounts must be updated every sixty days. In all cases, passwords must be changed immediately if there is any suspicion that they have been compromised.
+
 5. Multi-Factor Authentication
 To enhance security beyond passwords alone, multi-factor authentication is required for access to sensitive systems, remote access services, and all privileged accounts. This additional layer of verification may include authenticator applications, hardware tokens, or biometric factors where appropriate. The use of multi-factor authentication significantly reduces the risk of unauthorized access even if a password is compromised.
+
 6. Account Protection
 6.1 Failed Login Attempts
 To protect against unauthorized access attempts, accounts will be automatically locked after a defined number of unsuccessful login attempts. Specifically, after five failed attempts, the account will be locked for a minimum of fifteen minutes or until it is reset by authorized personnel. This measure helps mitigate brute-force attacks.
+
 6.2 Session Management
 User sessions must be managed to reduce the risk of unauthorized access due to unattended devices. Systems will automatically terminate sessions after fifteen minutes of inactivity, requiring users to re-authenticate to regain access. This ensures that access is limited to active and authorized users only.
+
 7. Storage and Transmission
 Passwords must be handled securely both at rest and in transit. Under no circumstances may passwords be stored in plain text. Instead, they must be protected using strong cryptographic hashing algorithms such as bcrypt or Argon2. Additionally, passwords must only be transmitted over secure channels that provide encryption, ensuring that they cannot be intercepted or read by unauthorized parties.
+
 8. User Responsibilities
 All users are responsible for maintaining the confidentiality and security of their passwords. This includes selecting strong passwords, not sharing them with others, and promptly reporting any suspected compromise. Users are also expected to use only organization-approved tools, such as password managers, for storing and managing their credentials. Care must be taken to ensure that passwords used for corporate systems are not reused in personal contexts.
+
 9. Privileged Accounts
 Accounts with elevated privileges require additional safeguards due to their increased access to sensitive systems and data. These accounts must use stronger passwords, with a minimum length of sixteen characters, and must always be protected by multi-factor authentication. The use of privileged accounts must be strictly controlled, monitored, and logged. Shared use of privileged accounts is not permitted, as it prevents accountability and traceability.
+
+
 10. Enforcement
+
 10.1 Technical Enforcement
 The organization will implement technical controls to enforce this policy consistently across all systems. These controls include enforcing password complexity requirements, preventing password reuse, requiring periodic password changes, and enabling account lockout mechanisms. Multi-factor authentication will be enforced where required, and authentication events will be logged and monitored to detect suspicious activity.
+
 10.2 Administrative Enforcement
-In addition to technical measures, the organization will conduct regular audits and access reviews to ensure compliance with this policy. Access rights will be reviewed periodically and adjusted as necessary based on role changes or termination of employment. Non-compliance will be addressed through appropriate administrative actions.
-10.3 Non-Compliance
+In addition to technical measures, the organization will conduct regular audits and access reviews to ensure compliance with this policy. Access rights will be reviewed periodically and adjusted as necessary based on role changes or termination of employment. Non-compliance will be addressed through appropriate administrative actions.10.3 Non-Compliance
 Failure to comply with this policy may result in disciplinary measures, which can include restriction of access rights, formal warnings, or termination of employment or contractual agreements, depending on the severity of the violation.   
 """
     #policy_2 = All USB storage devices must be blocked on organizational endpoints to prevent unauthorized data transfer and mitigate the risk of malware infections. This policy applies to all employees, contractors, and third-party users who access organizational systems and data. The use of USB storage devices is prohibited unless explicitly authorized by the IT department for specific business needs. Exceptions may be granted on a case-by-case basis, but only after a thorough risk assessment and implementation of appropriate security controls. Users must not attempt to bypass this policy by using alternative methods of data transfer, such as personal email accounts or cloud storage services, without prior approval. Violations of this policy may result in disciplinary action, up to and including termination of employment or contract. The organization will implement technical controls to enforce this policy, such as endpoint security solutions that block USB storage device access and monitor for any attempts to connect unauthorized devices.
@@ -597,6 +640,6 @@ Failure to comply with this policy may result in disciplinary measures, which ca
     matches = policy_analyzer.invoke({"query": policy})
     print(matches)
 """
-    result = find_relevant_configured_settings.invoke({
-    "policy_input": policy})
+    result = policy_analyzer.invoke({
+    "security_policy": policy, "platform": "windows10"})
     print(result)
