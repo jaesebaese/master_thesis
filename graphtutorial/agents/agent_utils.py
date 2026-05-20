@@ -10,12 +10,30 @@ This module defines the extended agent state structure that supports:
 """Utility functions for displaying messages and prompts in Jupyter notebooks."""
 
 import json
+import logging
+from io import StringIO
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+logger = logging.getLogger(__name__)
+
 console = Console()
+
+
+def _log_rich(renderable):
+    """Extract plain text from a Rich Panel for the log file."""
+    if isinstance(renderable, Panel):
+        title = Text.from_markup(renderable.title).plain if renderable.title else ""
+        content = renderable.renderable
+        content_plain = (
+            Text.from_markup(content).plain if isinstance(content, str) else str(content)
+        )
+        return f"[{title}]\n{content_plain}"
+    buf = StringIO()
+    Console(file=buf, highlight=False, no_color=True, width=120, force_terminal=False).print(renderable)
+    return buf.getvalue().strip()
 
 def stream_agent_v2(agent, query, config=None, on_interrupt=None):
     """Stream a deep agent run with subagent labeling, v2 format.
@@ -73,6 +91,11 @@ def stream_agent_v2(agent, query, config=None, on_interrupt=None):
                                     f"[bold cyan]→ Delegating to {sub_type}[/]: "
                                     f"{tc['args'].get('description', '')[:120]}"
                                 )
+                                logger.info(
+                                    "→ Delegating to %s: %s",
+                                    sub_type,
+                                    tc['args'].get('description', '')[:120],
+                                )
 
                 if not is_subagent and node_name == "tools":
                     for msg in (data or {}).get("messages", []):
@@ -83,6 +106,7 @@ def stream_agent_v2(agent, query, config=None, on_interrupt=None):
                                 console.print(
                                     f"[bold green]✓ {sub['type']} returned[/]"
                                 )
+                                logger.info("✓ %s returned", sub['type'])
 
                 # Print messages (full length) labeled by source
                 if isinstance(data, dict):
@@ -90,6 +114,7 @@ def stream_agent_v2(agent, query, config=None, on_interrupt=None):
                         if "messages" in key and isinstance(value, list) and value:
                             label = source if is_subagent else "main"
                             console.print(f"[dim]── {label} / {node_name} ──[/]")
+                            logger.info("── %s / %s ──", label, node_name)
                             format_messages(value)
 
         if not interrupted:
@@ -112,7 +137,7 @@ def format_message_content(message):
             if item.get("type") == "text":
                 parts.append(item["text"])
             elif item.get("type") == "tool_use":
-                parts.append(f"\n🔧 Tool Call: {item['name']}")
+                parts.append(f"🔧 Tool Call: {item['name']}")
                 parts.append(f"   Args: {json.dumps(item['input'], indent=2, ensure_ascii=False)}")
                 parts.append(f"   ID: {item.get('id', 'N/A')}")
                 tool_calls_processed = True
@@ -126,7 +151,7 @@ def format_message_content(message):
         and message.tool_calls
     ):
         for tool_call in message.tool_calls:
-            parts.append(f"\n🔧 Tool Call: {tool_call['name']}")
+            parts.append(f"🔧 Tool Call: {tool_call['name']}")
             parts.append(f"   Args: {json.dumps(tool_call['args'], indent=2, ensure_ascii=False)}")
             parts.append(f"   ID: {tool_call['id']}")
 
@@ -174,70 +199,18 @@ def format_messages(messages):
             raw = m.content if isinstance(m.content, str) else str(m.content)
             tool_name = getattr(m, "name", "tool")
             summary = _summarize_tool_content(raw)
-            console.print(Panel(summary, title=f"🔧 Tool Result: {tool_name}", border_style="yellow"))
+            panel = Panel(summary, title=f"🔧 Tool Result: {tool_name}", border_style="yellow")
+            console.print(panel)
+            logger.info(_log_rich(panel))
         else:
             content = format_message_content(m)
             if msg_type == "Human":
-                console.print(Panel(content, title="🧑 Human", border_style="blue"))
+                panel = Panel(content, title="🧑 Human", border_style="blue")
             elif msg_type == "Ai":
-                console.print(Panel(content, title="🤖 Assistant", border_style="green"))
+                panel = Panel(content, title="🤖 Assistant", border_style="green")
             else:
-                console.print(Panel(content, title=f"📝 {msg_type}", border_style="white"))
+                panel = Panel(content, title=f"📝 {msg_type}", border_style="white")
+            console.print(panel)
+            logger.info(_log_rich(panel))
 
 
-def format_message(messages):
-    """Alias for format_messages for backward compatibility."""
-    return format_messages(messages)
-
-
-def show_prompt(prompt_text: str, title: str = "Prompt", border_style: str = "blue"):
-    """Display a prompt with rich formatting and XML tag highlighting.
-
-    Args:
-        prompt_text: The prompt string to display
-        title: Title for the panel (default: "Prompt")
-        border_style: Border color style (default: "blue")
-    """
-    # Create a formatted display of the prompt
-    formatted_text = Text(prompt_text)
-    formatted_text.highlight_regex(r"<[^>]+>", style="bold blue")  # Highlight XML tags
-    formatted_text.highlight_regex(
-        r"##[^#\n]+", style="bold magenta"
-    )  # Highlight headers
-    formatted_text.highlight_regex(
-        r"###[^#\n]+", style="bold cyan"
-    )  # Highlight sub-headers
-
-    # Display in a panel for better presentation
-    console.print(
-        Panel(
-            formatted_text,
-            title=f"[bold green]{title}[/bold green]",
-            border_style=border_style,
-            padding=(1, 2),
-        )
-    )
-
-# more expressive runner
-async def stream_agent(agent, query, config=None):
-    async for graph_name, stream_mode, event in agent.astream(
-        query,
-        stream_mode=["updates", "values"], 
-        subgraphs=True,
-        config=config
-    ):
-        if stream_mode == "updates":
-            print(f'Graph: {graph_name if len(graph_name) > 0 else "root"}')
-            
-            node, result = list(event.items())[0]
-            print(f'Node: {node}')
-            
-            for key in result.keys():
-                if "messages" in key:
-                    # print(f"Messages key: {key}")
-                    format_messages(result[key])
-                    break
-        elif stream_mode == "values":
-            current_state = event
-
-    return current_state

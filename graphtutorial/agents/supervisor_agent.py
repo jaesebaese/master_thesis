@@ -6,11 +6,12 @@ from search_agent import search_agent
 from config_agent import config_agent
 from policy_agent import policy_agent
 from cis_benchmark_agent import cis_benchmark_agent
+from interdepedency_agent import interdependency_agent
 from typing import Any
 import json
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
-from agent_utils import stream_agent, format_messages, stream_agent_v2
+from agent_utils import stream_agent_v2
 from dotenv import load_dotenv
 import logging
 import os
@@ -21,7 +22,6 @@ OPENAI_MODEL = "gpt-5.4-mini-2026-03-17"
 
 model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature=0.0)
 
-logger = logging.getLogger(__name__)
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -88,7 +88,7 @@ def log_chunk(chunk: dict) -> None:
 
         # messages might also be an Overwrite wrapper, not a list
         if not isinstance(messages, list):
-            logger.info("[%s] messages=%s", node, str(messages)[:300])
+            logger.info("[%s] messages=%s", node, str(messages)[:1000])
             continue
 
         for msg in messages:
@@ -96,20 +96,10 @@ def log_chunk(chunk: dict) -> None:
             content = getattr(msg, "content", "")
             if not isinstance(content, str):
                 content = str(content)
-            preview = content[:300] + ("..." if len(content) > 300 else "")
+            preview = content[:1000] + ("..." if len(content) > 1000 else "")
             logger.info("[%s] %s: %s", node, role, preview)
 
 
-@wrap_tool_call
-def tool_logger(request, handler):
-    name = request.tool_call["name"]
-    args = request.tool_call["args"]
-    logger.info("Tool call: %s args=%s", name, args)
-    result = handler(request)
-    content = result.content if hasattr(result, "content") else str(result)
-    truncated = content[:300] + ("..." if len(content) > 300 else "")
-    logger.info("Tool result: %s", truncated)
-    return result
 
 
 def _extract_task_content(result) -> str:
@@ -169,8 +159,8 @@ checkpointer = MemorySaver()
 
 agent = create_deep_agent(
     model=model,
-    middleware=[task_error_guard, tool_logger, log_before_model, log_after_model],
-    subagents=[config_agent, policy_agent, search_agent, cis_benchmark_agent],
+    middleware=[task_error_guard, log_before_model, log_after_model],
+    subagents=[config_agent, policy_agent, search_agent, cis_benchmark_agent, interdependency_agent],
     checkpointer=checkpointer,
     system_prompt = """
 You are a Microsoft Intune security supervisor. You orchestrate specialised subagents.
@@ -178,24 +168,26 @@ You are a Microsoft Intune security supervisor. You orchestrate specialised suba
 Delegate tasks to subagents using the `task` tool with this format:
 {
   "description": "What the subagent should do",
-  "subagent_type": "policy_agent" | "config_agent" | "cis_benchmark_agent" | "search_agent"
+  "subagent_type": "policy_agent" | "config_agent" | "interdependency_agent" | "cis_benchmark_agent" | "search_agent"
 }
 
 After each subagent returns, use the write_tool to save the result to memory.
 
 PROCESS (follow all steps in order):
-  Step 1: Delegate to policy_agent with password_policy.txt to find relevant policies for the topic.
+  Step 1: Delegate to policy_agent to find relevant policies for the topic.
   Step 2: Delegate to config_agent for current configured values, scoped to settings from Step 1.
           config_agent will automatically write its output to relevant_configs.json.
   Step 3: Delegate to cis_benchmark_agent. In the description tell it:
           "Read relevant_configs.json to get the settings list. Use compare_relevant_settings_to_cis_benchmark
           with those settings. Return CIS findings only."
-  Step 4: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
+  Step 4: Delegate to interdependency_agent. 
+          Check whether there would be any conflicts or other interdependencies among the settings.
+  Step 5: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
           In the description, tell it to read relevant_configs.json for the full settings list.
-  Step 5: Present results as a markdown table with EXACTLY these columns:
+  Step 6: Present results as a markdown table with EXACTLY these columns:
           | Setting | Configured | Recommended | Status | Dependencies |
           Status must be one of: COMPLIANT, NON-COMPLIANT, NOT CONFIGURED.
-  Step 6: After the table, write:
+  Step 7: After the table, write:
           - A "Remediation" section listing each NON-COMPLIANT setting with its remediation path from CIS.
           - Any interdependency warnings from Step 4.
           - A note flagging which rows used web search (medium confidence).
@@ -221,7 +213,7 @@ def _file_data(path: str) -> dict:
 run_config = {"configurable": {"thread_id": "1"}}
 pending: Any = {
     "messages": [{"role": "user", "content": query}],
-    "files": {"password_policy.txt": _file_data(os.path.join(os.path.dirname(__file__), "password_policy.txt"))},
+    "files": {"security_policy.txt": _file_data(os.path.join(os.path.dirname(__file__), "security_policy.txt"))},
 }
 
 print("Pending: ", pending)
@@ -235,5 +227,8 @@ def handle_interrupt(interrupt_values) -> Command:
     decision = input("Continue pipeline? [y/n]: ").strip().lower()
     return Command(resume={"continue": decision != "n"})
 
+if __name__ == "__main__":
+    logger = logging.getLogger(__name__)
 
-stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
+    result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
+
