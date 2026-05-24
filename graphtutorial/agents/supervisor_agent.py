@@ -168,29 +168,26 @@ You are a Microsoft Intune security supervisor. You orchestrate specialised suba
 Delegate tasks to subagents using the `task` tool with this format:
 {
   "description": "What the subagent should do",
-  "subagent_type": "policy_agent" | "config_agent" | "interdependency_agent" | "cis_benchmark_agent" | "search_agent"
+  "subagent_type": "policy_agent" | "interdependency_agent" | "cis_benchmark_agent" | "search_agent"
 }
 
 After each subagent returns, use the write_tool to save the result to memory.
 
 PROCESS (follow all steps in order):
-  Step 1: Delegate to policy_agent to find relevant policies for the topic.
-  Step 2: Delegate to config_agent for current configured values, scoped to settings from Step 1.
-          config_agent will automatically write its output to relevant_configs.json.
-  Step 3: Delegate to cis_benchmark_agent. In the description tell it:
-          "Read relevant_configs.json to get the settings list. Use compare_relevant_settings_to_cis_benchmark
-          with those settings. Return CIS findings only."
-  Step 4: Delegate to interdependency_agent. 
+  Step 1: Delegate to policy_agent to extract all the requirements from the security policy.
+  Step 2: Delegate to cis_benchmark_agent to check if the configurations are compliant to the CIS Benchmark.
+  Step 3: Delegate to interdependency_agent. 
           Check whether there would be any conflicts or other interdependencies among the settings.
-  Step 5: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
-          In the description, tell it to read relevant_configs.json for the full settings list.
-  Step 6: Present results as a markdown table with EXACTLY these columns:
-          | Setting | Configured | Recommended | Status | Dependencies |
+  Step 4: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
+          In the description, tell it to read tenant_configs_vs_benchmark.json.json for the full settings list.
+  Step 5: Present results as a markdown table with EXACTLY these columns:
+          | Setting | Configured | Recommended | Status | Dependencies | Policy Name |
           Status must be one of: COMPLIANT, NON-COMPLIANT, NOT CONFIGURED.
-  Step 7: After the table, write:
+  Step 6: After the table, write:
           - A "Remediation" section listing each NON-COMPLIANT setting with its remediation path from CIS.
           - Any interdependency warnings from Step 4.
-          - A note flagging which rows used web search (medium confidence).
+          - A note flagging which rows used web search and what the recommendation from Microsoft is.
+          - An overview of all security requirements and whether they are met with the settings in the tenant
           - A "Security Posture Summary" paragraph.
 
 OUTPUT FORMAT:
@@ -215,8 +212,6 @@ pending: Any = {
     "messages": [{"role": "user", "content": query}],
     "files": {"security_policy.txt": _file_data(os.path.join(os.path.dirname(__file__), "security_policy.txt"))},
 }
-
-print("Pending: ", pending)
 
 def handle_interrupt(interrupt_values) -> Command:
     for iv in interrupt_values:

@@ -206,24 +206,53 @@ def policy_analyzer(runtime: ToolRuntime, security_policy: str, platform: str ) 
     hits = sorted(best.values(), key=lambda h: h["similarity_score"], reverse=True)
     return json.dumps(hits, indent=2)
 
-""" @tool
-def policy_requirement_extractor(policy_input: str) -> str:
-    
+@tool
+def policy_requirement_extractor(runtime: ToolRuntime) -> str:
+    """
     Extract structured security requirements from free-text policy text.
 
     This tool only extracts requirements. It does not map them to Intune
     settings, check compliance, or generate remediation advice.
+    """
+    files = runtime.state.get("files", {})
     
+    file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
+    print(file_entry)
+    if file_entry is not None:
+        if isinstance(file_entry, dict):
+            raw = file_entry.get("content", [])
+            policy_file = "\n\n".join(raw) if isinstance(raw, list) else str(raw)
+        else:
+            policy_file = str(file_entry)
+    elif os.path.join(os.path.dirname(__file__), "security_policy.txt"):
+        print("FILE NOT FOUND")
+        #TODO: add the file in the local path
+        disk_path = os.path.join(os.path.dirname(__file__), "security_policy.txt")
+        try:
+            with open(disk_path) as f:
+                policy_file = f.read()
+        except FileNotFoundError:
+            return json.dumps({
+                "settings": [],
+                "error": "security_policy.txt not found in virtual filesystem or on disk.",
+            })
 
-    system_prompt = 
-        You are a security policy requirement extraction engine.
 
-        Your task is to extract enforceable security requirements from free-text policy text.
+    system_prompt = """
+        You are a security policy requirement extraction engine for Microsoft Intune
+        MDM/device-configuration deployment.
 
-        You must only extract requirements that are explicitly stated or strongly implied
-        by the provided text.
+        Your task: extract the requirements from free-text policy that can be
+        enforced through a  device configuration, compliance, or account-protection 
+        policy on a managed endpoint.
 
-        Do not:
+        CRITICAL FILTER — apply before extracting anything:
+        A requirement qualifies ONLY IF it maps to an enforceable device/OS/account
+        setting that Intune can push to or evaluate on a managed device. If the
+        requirement depends on human behavior, manual process, or organizational governance, 
+        you MUST exclude it — even if it is mandatory in the policy.
+
+        DO NOT:
         - map requirements to Intune settings
         - check compliance
         - recommend remediation
@@ -239,7 +268,7 @@ def policy_requirement_extractor(policy_input: str) -> str:
         "requirements": [
             {
             "requirement_id": "REQ-001",
-            "source_text": "Exact sentence or clause from the policy text.",
+            "source_text": "A sentence that describes what the requirement is and for what it is",
             "security_domain": "security_policy | encryption | firewall | antivirus | authentication | update_management | device_compliance | data_protection | access_control | other",
             "control_intent": "short_snake_case_description_of_the_control_goal",
             "expected_value": "specific required value, boolean, number, or null if not specified",
@@ -253,19 +282,19 @@ def policy_requirement_extractor(policy_input: str) -> str:
 
         Rules:
         - requirement_id must start at REQ-001 and increment sequentially.
-        - source_text must quote the relevant sentence or clause from the input.
+        - source_text must summarize the relevant sentence or clause from the input.
         - security_domain must use one of the listed categories.
         - control_intent must be short, specific, and written in snake_case.
         - expected_value must be null if no concrete value is stated.
         - Do not infer technical configuration settings.
         - Do not include explanations outside the JSON.
         - The output must be parseable by json.loads().
-        
+        """
     
-    user_prompt = f
+    user_prompt = f"""
     Extract structured security requirements from this policy text:
-    {policy_input}
-    
+    {policy_file}
+    """
 
     response = model.invoke([
         {"role": "system", "content": system_prompt},
@@ -287,7 +316,7 @@ def policy_requirement_extractor(policy_input: str) -> str:
             "raw_output": raw_output,
         }, indent=2)
 
-    return json.dumps(parsed, indent=2) """
+    return json.dumps(parsed, indent=2)
 
 
 RELEVANCE_SYSTEM_PROMPT = """\
@@ -319,30 +348,6 @@ Rules:
 - Do not add explanations outside the JSON.
 - The output must be parseable by json.loads().
 """
-def flatten_for_relevance_old(raw_policies):
-    """Extract just the fields the LLM needs to judge relevance."""
-    flat = []
-    for policy in raw_policies:
-        for setting in policy.get("settings", []):
-            inst = setting.get("settingInstance", {})
-            sid = inst.get("settingDefinitionId")
-            if not sid:
-                continue
-            
-            # Extract configured value (depending on instance type)
-            value = None
-            if "choiceSettingValue" in inst:
-                value = inst["choiceSettingValue"].get("value")
-            elif "simpleSettingValue" in inst:
-                value = inst["simpleSettingValue"].get("value")
-            
-            flat.append({
-                "id": sid,
-                "policy_name": policy.get("name", ""),
-                "configured_value": value,
-                "description": policy.get("description", ""),
-            })
-    return flat
 
 
 def _resolve_choice_label(defn: dict, chosen_id: str) -> tuple[str, list[str]]:
@@ -547,20 +552,17 @@ policy_agent = {
         "such as 'BitLocker', 'firewall inbound rules', or 'password complexity'."
     ),
     "system_prompt": ("""\
-You are an Intune settings discovery specialist. Your role is to identify which
-Intune catalog settings are relevant to a given security policy or topic.
-
-Your task:
-1. Call policy_analyzer() to find intune policies that are linked to 
-   the security policy provided by the user.
-2. Call write_file with:
-     path: 'policy_results.json'
-     content: the exact JSON string returned by policy_analyzer
-   Do this before summarising the results.
-3. Return the result from policy_analyzer as your final response.
+You are a security policy specialist.
+Call the policy_requirement_extractor to extract the requirements out of the
+provided security policy.
+## Saving output\n
+    After calling find_configs_in_policies(), call write_file with:
+        path: 'policy_requirements.json'
+        content: the raw JSON string returned by policy_requirement_extractor\n"
+    Do this before summarising the results.
 """
     ),
-    "tools": [policy_analyzer],
+    "tools": [policy_requirement_extractor],
 }
 
 
@@ -640,6 +642,6 @@ Failure to comply with this policy may result in disciplinary measures, which ca
     matches = policy_analyzer.invoke({"query": policy})
     print(matches)
 """
-    result = policy_analyzer.invoke({
+    result = policy_requirement_extractor.invoke({
     "security_policy": policy, "platform": "windows10"})
     print(result)
