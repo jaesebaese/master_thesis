@@ -29,10 +29,10 @@ model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature
 
 
 logging.basicConfig(
-    level=logging.INFO, 
-    format="%(asctime)s [%(levelname)s] %(message)s", 
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("agent.log", mode='w'),  # overwrite log file on each run
+        logging.FileHandler("agent.log", mode='w'),
     ],)
 
 import time
@@ -60,11 +60,10 @@ def log_after_model(state, runtime):
         content = str(content)
 
     logger.info(
-        "← Model call done in %.2fs | tokens=%s | tool_calls=%s\n%s",
+        "← model %.2fs | tokens=%s | tool_calls=%s",
         elapsed,
         f"{usage.get('input_tokens', '?')}→{usage.get('output_tokens', '?')}",
         [tc["name"] for tc in tool_calls] if tool_calls else "none",
-        content[:4000] + ("..." if len(content) > 4000 else ""),
     )
     return None
 

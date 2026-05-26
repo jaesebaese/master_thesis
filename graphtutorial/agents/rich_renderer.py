@@ -141,10 +141,18 @@ class RichRenderer:
     def _log_panel(self, panel: Panel) -> None:
         if not self.logger:
             return
+        # Render the content without the panel border so the log stays plain text.
         buf = StringIO()
         Console(file=buf, highlight=False, no_color=True, width=120,
-                force_terminal=False).print(panel)
-        self.logger.info(buf.getvalue().rstrip())
+                force_terminal=False).print(panel.renderable)
+        title = str(panel.title) if panel.title else ""
+        body = buf.getvalue().rstrip()
+        if title and body:
+            self.logger.info("%s\n%s", title, body)
+        elif title:
+            self.logger.info(title)
+        elif body:
+            self.logger.info(body)
 
     def _emit_panel(self, panel: Panel, depth: int) -> None:
         # Indent the whole panel by depth using padding on a wrapping group.
@@ -154,7 +162,6 @@ class RichRenderer:
             self.console.print(Text(pad, end=""), panel)
         else:
             self.console.print(panel)
-        self._log_panel(panel)
 
     # -- main callback ------------------------------------------------------ #
     def __call__(self, ev: ActivityEvent) -> None:
@@ -199,6 +206,8 @@ class RichRenderer:
                 title_align="left",
             )
             self._emit_panel(panel, ev.depth)
+            if self.logger:
+                self.logger.info("→ task delegated to: %s", ev.source)
 
         elif t is EventType.SUBAGENT_STATUS:
             # lightweight inline note, no panel
@@ -214,13 +223,15 @@ class RichRenderer:
                 note.append(f"\n  {_truncate(ev.extra['error'], 200)}", style="red")
             self.console.print(note)
             if self.logger:
-                self.logger.info("%s %s: %s", mark, ev.source, ev.status)
+                self.logger.info("%s subagent %s: %s", mark, ev.source, ev.status)
 
         elif t is EventType.TOOL_START:
             self._tool_out[ev.source] = []
             self._tool_meta[ev.source] = {
                 "name": ev.tool_name, "input": ev.tool_input, "depth": ev.depth,
             }
+            if self.logger:
+                self.logger.info("→ tool started: %s (%s)", ev.tool_name, ev.source)
 
         elif t is EventType.TOOL_OUTPUT:
             self._tool_out.setdefault(ev.source, []).append(ev.text)
@@ -228,6 +239,8 @@ class RichRenderer:
         elif t is EventType.TOOL_END:
             self._flush_tool(ev.source, ev.depth, final_output=ev.text,
                              tool_name=ev.tool_name)
+            if self.logger:
+                self.logger.info("← tool finished: %s (%s)", ev.tool_name, ev.source)
 
         elif t is EventType.TOOL_ERROR:
             meta = self._tool_meta.pop(ev.source, {})
@@ -240,6 +253,8 @@ class RichRenderer:
                 title_align="left",
             )
             self._emit_panel(panel, ev.depth)
+            if self.logger:
+                self.logger.error("✗ %s (%s)", ev.tool_name or meta.get("name", "tool"), ev.source)
 
         elif t is EventType.ERROR:
             panel = Panel(
@@ -286,8 +301,8 @@ class RichRenderer:
 
         panel = Panel(
             body,
-            title=f"🔧 tool result · {name}" + ("" if source == "coordinator" else f" ({source})"),
-            border_style="yellow",
+            title=f"🔧 tool · {name}" + ("" if source == "coordinator" else f" ({source})"),
+            border_style="blue",
             title_align="left",
         )
         self._emit_panel(panel, depth)
