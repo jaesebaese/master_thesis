@@ -9,12 +9,14 @@ from cis_benchmark_agent import cis_benchmark_agent
 from interdepedency_agent import interdependency_agent
 from typing import Any
 import json
+from pathlib import Path
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
 from agent_utils import stream_agent_v2
 from dotenv import load_dotenv
 import logging
 import os
+import time
 from activity_stream import astream_activity
 from rich_renderer import RichRenderer
 import asyncio
@@ -163,10 +165,13 @@ async def task_error_guard(request, handler):
 
 checkpointer = MemorySaver()
 
+_run_dir = Path(__file__).parent / "runs" / str(int(time.time()))
+_run_dir.mkdir(parents=True, exist_ok=True)
+
 agent = create_deep_agent(
     model=model,
     middleware=[task_error_guard, log_before_model, log_after_model],
-    subagents=[config_agent, policy_agent, search_agent, cis_benchmark_agent, interdependency_agent],
+    subagents=[policy_agent, cis_benchmark_agent],
     checkpointer=checkpointer,
     system_prompt = """
 You are a Microsoft Intune security supervisor. You orchestrate specialised subagents.
@@ -174,27 +179,24 @@ You are a Microsoft Intune security supervisor. You orchestrate specialised suba
 Delegate tasks to subagents using the `task` tool with this format:
 {
   "description": "What the subagent should do",
-  "subagent_type": "policy_agent" | "interdependency_agent" | "cis_benchmark_agent" | "search_agent"
+  "subagent_type": "policy_agent" | "cis_benchmark_agent" 
 }
 
-After each subagent returns, use the write_tool to save the result to memory.
+After each subagent returns, use the write_tool to save the result to memory. Hence, write the result
+of each subagent in a file "[subagent_name]_result.md" and save it as a file in memory.
 
 PROCESS (follow all steps in order):
   Step 1: Delegate to policy_agent to extract all the requirements from the security policy.
   Step 2: Delegate to cis_benchmark_agent to check if the configurations are compliant to the CIS Benchmark.
-  Step 3: Delegate to interdependency_agent. 
-          Check whether there would be any conflicts or other interdependencies among the settings.
-  Step 4: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
-          In the description, tell it to read tenant_configs_vs_benchmark.json.json for the full settings list.
-  Step 5: Present results as a markdown table with EXACTLY these columns:
-          | Setting | Configured | Recommended | Status | Dependencies | Policy Name |
-          Status must be one of: COMPLIANT, NON-COMPLIANT, NOT CONFIGURED.
-  Step 6: After the table, write:
+  Step 3: After the table, write:
           - A "Remediation" section listing each NON-COMPLIANT setting with its remediation path from CIS.
           - Any interdependency warnings from Step 4.
           - A note flagging which rows used web search and what the recommendation from Microsoft is.
           - An overview of all security requirements and whether they are met with the settings in the tenant
           - A "Security Posture Summary" paragraph.
+          Make sure to write this result into a file called "final_result.md"
+
+Never call multiple subagents or tools at the same time. Each step must wait for the previous one to complete.
 
 OUTPUT FORMAT:
 Produce ONLY the markdown table from Step 5 followed by the sections from Step 6.
@@ -202,6 +204,14 @@ Do not wrap the output in JSON. Do not skip the table.
 """,
 
 )
+
+promtp = """Step 3: Delegate to interdependency_agent. 
+          Check whether there would be any conflicts or other interdependencies among the settings.
+  Step 4: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
+          In the description, tell it to read tenant_configs_vs_benchmark.json.json for the full settings list.
+  Step 5: Present results as a markdown table with EXACTLY these columns:
+          | Setting | Configured | Recommended | Status | Dependencies | Policy Name |
+          Status must be one of: COMPLIANT, NON-COMPLIANT, NOT CONFIGURED."""
 
 query = "What are the best practices for password configurations in Microsoft Intune for Windows 11 devices?"
 
@@ -237,3 +247,13 @@ if __name__ == "__main__":
     final_state = asyncio.run(
         astream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
     )
+
+    for vpath, entry in (final_state.get("files") or {}).items():
+        name = vpath.lstrip("/")
+        if not name:
+            continue
+        out = _run_dir / name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        lines = entry.get("content", []) if isinstance(entry, dict) else []
+        out.write_text("\n".join(lines) if isinstance(lines, list) else str(lines))
+    logger.info("Run files written to %s", _run_dir)

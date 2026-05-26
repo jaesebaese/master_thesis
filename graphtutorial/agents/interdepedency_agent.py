@@ -481,19 +481,14 @@ def find_catalog_interdependencies(runtime: ToolRuntime) -> str:
     """
     files = runtime.state.get("files", {})
     file_entry = files.get("/tenant_configs_vs_benchmark.json") or files.get("tenant_configs_vs_benchmark.json")
-    if file_entry is not None:
-        if isinstance(file_entry, dict):
-            raw = file_entry.get("content", [])
-            content_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
-        else:
-            content_str = str(file_entry)
+    
+    if file_entry is None:
+        return json.dumps({"error": "tenant_configs_vs_benchmark.json not found. Ensure policy_agent has run first."})
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        content_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
     else:
-        disk_path = os.path.join(os.path.dirname(__file__), "tenant_configs_vs_benchmark.json")
-        try:
-            with open(disk_path) as f:
-                content_str = f.read()
-        except FileNotFoundError:
-            return json.dumps({"error": "tenant_configs_vs_benchmark.json not found in virtual filesystem or on disk."})
+        content_str = str(file_entry)
 
     benchmark_output = json.loads(content_str)
 
@@ -722,21 +717,14 @@ def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
 
     files = runtime.state.get("files", {})
     file_entry = files.get("/policy_requirements.json") or files.get("policy_requirements.json")
-    if file_entry is not None:
-        if isinstance(file_entry, dict):
-            raw = file_entry.get("content", [])
-            requirements = "\n".join(raw) if isinstance(raw, list) else str(raw)
-        else:
-            requirements = str(file_entry)
-    else:
-        disk_path = os.path.join(os.path.dirname(__file__), "policy_requirements.json")
-        print("TAKE REQUIREMENTS FROM DISK")
-        try:
-            with open(disk_path) as f:
-                requirements = f.read()
-        except FileNotFoundError:
-            return json.dumps({"error": "requirements.json not found in virtual filesystem or on disk."})
+    if file_entry is None:
+        return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
 
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        requirements = "\n".join(raw) if isinstance(raw, list) else str(raw)
+    else:
+        requirements = str(file_entry)
     try:
         parsed = json.loads(requirements)
     except json.JSONDecodeError:

@@ -411,7 +411,6 @@ def compare_relevant_settings_to_benchmark(runtime: ToolRuntime) -> str:
                 "benchmark_policy": cis_match["benchmark_policy_name"],
             },
         })
-    print("Results:", json.dumps(results, indent=2))
     summary = {
         "total_checked": len(results),
         "compliant": sum(1 for r in results if r["status"] == "compliant"),
@@ -594,20 +593,13 @@ def search_cis_benchmark(runtime: ToolRuntime, requirements: str = "") -> str:
     """
     files = runtime.state.get("files", {})
     file_entry = files.get("/policy_requirements.json") or files.get("policy_requirements.json")
-    if file_entry is not None:
-        if isinstance(file_entry, dict):
-            raw = file_entry.get("content", [])
-            requirements = "\n".join(raw) if isinstance(raw, list) else str(raw)
-        else:
-            requirements = str(file_entry)
+    if file_entry is None:
+        return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        requirements = "\n".join(raw) if isinstance(raw, list) else str(raw)
     else:
-        disk_path = os.path.join(os.path.dirname(__file__), "policy_requirements.json")
-        print("TAKE REQUIREMENTS FROM DISK")
-        try:
-            with open(disk_path) as f:
-                requirements = f.read()
-        except FileNotFoundError:
-            return json.dumps({"error": "requirements.json not found in virtual filesystem or on disk."})
+        requirements = str(file_entry)
 
     try:
         parsed = json.loads(requirements)
@@ -672,13 +664,14 @@ def compare_search_results_to_tenant( runtime: ToolRuntime ) -> str:
     
     files = runtime.state.get("files", {})
     file_entry = files.get("/requirements_vs_benchmark.json") or files.get("requirements_vs_benchmark.json")
-    if file_entry is not None:
-        if isinstance(file_entry, dict):
-            raw = file_entry.get("content", [])
-            requirements = "\n".join(raw) if isinstance(raw, list) else str(raw)
-        else:
-            requirements = str(file_entry)
-    
+    if file_entry is None:
+        return json.dumps({"error": "requirements_vs_benchmark.json not found. Run search_cis_benchmark first."})
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        requirements = "\n".join(raw) if isinstance(raw, list) else str(raw)
+    else:
+        requirements = str(file_entry)
+
     try:
         parsed = json.loads(requirements)
     except json.JSONDecodeError:
@@ -805,7 +798,6 @@ def compare_search_results_to_tenant( runtime: ToolRuntime ) -> str:
         "non_compliant": sum(1 for r in results if r["status"] == "non_compliant"),
         "not_configured": sum(1 for r in results if r["status"] == "not_configured"),
     }
-    print(json.dumps({"summary": summary, "results": results}, indent=2))
     return json.dumps({"summary": summary, "results": results}, indent=2)
 
 

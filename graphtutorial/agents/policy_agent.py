@@ -218,25 +218,13 @@ def policy_requirement_extractor(runtime: ToolRuntime) -> str:
     
     file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
 
-    if file_entry is not None:
-        if isinstance(file_entry, dict):
-            raw = file_entry.get("content", [])
-            policy_file = "\n\n".join(raw) if isinstance(raw, list) else str(raw)
-        else:
-            policy_file = str(file_entry)
-    elif os.path.join(os.path.dirname(__file__), "security_policy.txt"):
-        print("FILE NOT FOUND")
-        #TODO: add the file in the local path
-        disk_path = os.path.join(os.path.dirname(__file__), "security_policy.txt")
-        try:
-            with open(disk_path) as f:
-                policy_file = f.read()
-        except FileNotFoundError:
-            return json.dumps({
-                "settings": [],
-                "error": "security_policy.txt not found in virtual filesystem or on disk.",
-            })
-
+    if file_entry is None:
+         return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        policy_file = "\n\n".join(raw) if isinstance(raw, list) else str(raw)
+    else:
+        policy_file = str(file_entry)
 
     system_prompt = """
         You are a security policy requirement extraction engine for Microsoft Intune
@@ -565,6 +553,7 @@ provided security policy.
         path: 'policy_requirements.json'
         content: the raw JSON string returned by policy_requirement_extractor\n"
     Do this before summarising the results.
+    
 """
     ),
     "tools": [policy_requirement_extractor],
