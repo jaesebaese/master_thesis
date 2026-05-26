@@ -139,7 +139,7 @@ def policy_analyzer(runtime: ToolRuntime, security_policy: str, platform: str ) 
     files = runtime.state.get("files", {})
     
     file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
-    print(file_entry)
+
     if file_entry is not None:
         if isinstance(file_entry, dict):
             raw = file_entry.get("content", [])
@@ -217,7 +217,7 @@ def policy_requirement_extractor(runtime: ToolRuntime) -> str:
     files = runtime.state.get("files", {})
     
     file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
-    print(file_entry)
+
     if file_entry is not None:
         if isinstance(file_entry, dict):
             raw = file_entry.get("content", [])
@@ -300,8 +300,12 @@ def policy_requirement_extractor(runtime: ToolRuntime) -> str:
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ])
-
-    raw_output = response.content.strip()
+    content = response.content
+    if isinstance(content, list):
+        content = "".join(
+            b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+        )
+    raw_output = (content or "").strip()
 
     # Local models sometimes wrap JSON in ```json fences
     if raw_output.startswith("```"):
@@ -526,11 +530,12 @@ def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | 
         {"role": "user", "content": user_prompt},
     ])
 
-    raw = response.content.strip()
-
-    # LLMs sometimes wrap JSON in ```json fences
-    if raw.startswith("```"):
-        raw = raw.replace("```json", "").replace("```", "").strip()
+    content = response.content
+    if isinstance(content, list):
+        content = "".join(
+            b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+        )
+    raw = (content or "").strip()
 
     # Validate JSON before returning, fall through gracefully
     try:

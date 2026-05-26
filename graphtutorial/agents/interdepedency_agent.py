@@ -421,7 +421,12 @@ def find_interdependencies_in_configurations(runtime: ToolRuntime) -> str:
                 {"role": "system", "content": CLASSIFY_SYSTEM},
                 {"role": "user", "content": user_prompt},
             ])
-            raw = response.content.strip()
+            content = response.content
+            if isinstance(content, list):
+                content = "".join(
+                    b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+                )
+            raw = (content or "").strip()
             if raw.startswith("```"):
                 raw = raw.replace("```json", "").replace("```", "").strip()
 
@@ -791,7 +796,13 @@ def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
             {"role": "system", "content": REQUIREMENT_CLASSIFY_SYSTEM},
             {"role": "user", "content": user_prompt},
         ])
-        raw = response.content.strip()
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+            )
+        raw = (content or "").strip()
+        
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
 

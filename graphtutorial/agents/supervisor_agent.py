@@ -15,6 +15,11 @@ from agent_utils import stream_agent_v2
 from dotenv import load_dotenv
 import logging
 import os
+from activity_stream import astream_activity
+from rich_renderer import RichRenderer
+import asyncio
+
+
 
 load_dotenv()
 
@@ -29,7 +34,6 @@ logging.basicConfig(
     handlers=[
         logging.FileHandler("agent.log", mode='w'),  # overwrite log file on each run
     ],)
-
 
 import time
 from contextvars import ContextVar
@@ -47,11 +51,14 @@ def log_after_model(state, runtime):
     started = _start.get()
     elapsed = time.time() - started if started else 0
     last_msg = state["messages"][-1]
-    
+
     tool_calls = getattr(last_msg, "tool_calls", None) or []
     usage = getattr(last_msg, "usage_metadata", None) or {}
-    
+
     content = getattr(last_msg, "content", "") or ""
+    if not isinstance(content, str):
+        content = str(content)
+
     logger.info(
         "← Model call done in %.2fs | tokens=%s | tool_calls=%s\n%s",
         elapsed,
@@ -134,11 +141,11 @@ def _task_result_is_error(content: str) -> bool:
 
 
 @wrap_tool_call
-def task_error_guard(request, handler):
+async def task_error_guard(request, handler):
     """After a task (subagent) call completes, pause for human review if the result looks like an error."""
     if request.tool_call["name"] != "task":
-        return handler(request)
-    result = handler(request)
+        return await handler(request)
+    result = await handler(request)
     content = _extract_task_content(result)
     if _task_result_is_error(content):
         subagent = request.tool_call["args"].get("subagent_type", "?")
@@ -224,6 +231,10 @@ def handle_interrupt(interrupt_values) -> Command:
 
 if __name__ == "__main__":
     logger = logging.getLogger(__name__)
+    renderer = RichRenderer(logger=logger)
 
-    result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
+    #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
 
+    final_state = asyncio.run(
+        astream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+    )
