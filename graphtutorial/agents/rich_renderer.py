@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from io import StringIO
 from typing import Optional
 
@@ -192,7 +193,7 @@ class RichRenderer:
         elif t is EventType.SUBAGENT_START:
             task = ""
             if ev.tool_input:
-                task = _truncate(str(ev.tool_input), self.task_limit)
+                task = str(ev.tool_input)
             body = Text()
             body.append("status: ", style="dim")
             body.append(str(ev.status))
@@ -291,13 +292,34 @@ class RichRenderer:
         deltas = "".join(self._tool_out.pop(source, []))
         name = tool_name or meta.get("name", "tool")
         raw = final_output or deltas
+        inp = meta.get("input") or {}
 
-        parts = []
-        inp = meta.get("input")
-        if inp not in (None, "", {}):
-            parts.append(Text(f"args: {_truncate(_fmt_args(inp), self.args_limit)}", style="dim"))
-        parts.append(Text(summarize_tool_content(raw, limit=self.tool_limit)))
-        body = Group(*parts) if len(parts) > 1 else parts[0]
+        if name == "write_todos":
+            body = _fmt_todos(inp)
+        elif name in ("write_file", "read_file"):
+            file_path = inp.get("file_path", "") if isinstance(inp, dict) else ""
+            body = Text()
+            body.append("file path: ", style="dim")
+            body.append(file_path or "(unknown path)")
+        elif name == "task":
+            body = _fmt_task(inp)
+
+        elif depth > 0:
+            try:
+                pretty = json.dumps(json.loads(_unwrap_tool_message(raw)), indent=2, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pretty = raw
+            all_lines = pretty.splitlines()
+            lines = all_lines[:5]
+            if len(all_lines) > 5:
+                lines.append("…")
+            body = Text("\n".join(lines))
+        else:
+            parts = []
+            if inp not in (None, "", {}):
+                parts.append(Text(f"args: {_truncate(_fmt_args(inp), self.args_limit)}", style="dim"))
+            parts.append(Text(summarize_tool_content(raw, limit=self.tool_limit)))
+            body = Group(*parts) if len(parts) > 1 else parts[0]
 
         panel = Panel(
             body,
@@ -311,6 +333,43 @@ class RichRenderer:
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
+_TOOL_MSG_RE = re.compile(r"^content='(.*?)'\s+name=", re.DOTALL)
+
+def _unwrap_tool_message(raw: str) -> str:
+    """Extract the JSON payload from a LangChain ToolMessage repr like content='...' name='...'."""
+    m = _TOOL_MSG_RE.match(raw)
+    if m:
+        return m.group(1).replace("\\n", "\n").replace("\\'", "'")
+    return raw
+
+
+def _fmt_task(inp) -> Text:
+    if not isinstance(inp, dict):
+        return Text(str(inp))
+    t = Text()
+    for field in ("subagent_type", "task", "description"):
+        val = inp.get(field)
+        if val:
+            t.append(f"{field}: ", style="dim")
+            t.append(f"{val}\n")
+    return t
+
+
+def _fmt_todos(inp) -> Text:
+    todos = inp.get("todos", []) if isinstance(inp, dict) else []
+    if not todos:
+        return Text("(no todos)")
+    STATUS_STYLE = {"completed": "green", "in_progress": "yellow", "pending": "dim"}
+    t = Text()
+    for todo in todos:
+        content = todo.get("content", "")
+        status = todo.get("status", "")
+        style = STATUS_STYLE.get(status, "")
+        t.append(f"  [{status}]", style=style)
+        t.append(f" {content}\n")
+    return t
+
+
 def _truncate(s: str, n) -> str:
     s = str(s)
     if n is None or len(s) <= n:
@@ -343,7 +402,7 @@ if __name__ == "__main__":
     # Exercise the renderer with the same fake agent used in activity_stream.
     from activity_stream import stream_activity
     from types import SimpleNamespace as NS
-
+    
     class _Iter:
         def __init__(self, items): self._items = list(items)
         def __iter__(self): return iter(self._items)
@@ -365,8 +424,8 @@ if __name__ == "__main__":
             self.task_input = f"Extract requirements for {name}"
             self.messages = _Iter([_Msg(f"Analyzing for {name}. Here is my finding. ")])
             self.tool_calls = _Iter([
-                _Call("search", {"q": name}, json.dumps(
-                    [{"cis_id": "1.1", "cis_title": "Enforce password history", "status": "pass"},
+                _Call("write_file", {"q": name}, json.dumps(
+                    [{"file_path": "/blablabala.md", "cis_title": "Enforce password history", "status": "pass"},
                      {"cis_id": "1.2", "cis_title": "Minimum password length", "status": "fail"}]))
             ])
             self.subagents = _Iter([])
