@@ -3,9 +3,8 @@ from langchain.tools import tool, ToolRuntime
 from typing import List
 import json
 import os
-import chromadb
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
-from policy_agent import PolicyAgentResults, flatten_for_relevance, _get_intune_collection, SETTINGS_JSON
+from policy_agent import PolicyAgentResults, _get_intune_collection, SETTINGS_JSON
+from preprocessing_at_startup import flatten_for_relevance
 from deepagents import create_deep_agent
 import logging
 import time
@@ -52,37 +51,6 @@ If no meaningful relationships exist, return [].
 Output must be valid JSON parseable by json.loads().
 """
 
-REQUIREMENT_CLASSIFY_SYSTEM = """\
-You are an Intune security policy compliance analyst.
-
-You will receive:
-1. A "requirement" — a security policy requirement with its intent and expected controls.
-2. A list of "candidates" — Intune settings currently configured in the tenant that are
-   semantically related to this requirement.
-
-For each candidate classify its relationship to the requirement using exactly one label:
-- satisfies    – the setting directly fulfills or strongly supports the requirement
-- conflicts    – the setting is configured in a way that contradicts or undermines the requirement
-- partial      – the setting partially addresses the requirement but is insufficient alone
-- prerequisite – the setting must be in place for the requirement to take effect (and it is)
-- unrelated    – no meaningful relationship (omit from output)
-
-Return a JSON array. Each element must have:
-{
-  "candidate_id": "...",
-  "candidate_name": "...",
-  "configured_value_label": "...",
-  "relationship": "<label>",
-  "severity": "finding" | "informational",
-  "explanation": "<one concise sentence>"
-}
-
-Use severity="finding" for conflicts only.
-Use severity="informational" for satisfies, partial, and prerequisite.
-If no meaningful relationships exist, return [].
-Output must be valid JSON parseable by json.loads().
-"""
-
 _start = ContextVar("model_start", default=None)
 
 logging.basicConfig(
@@ -116,45 +84,6 @@ def log_after_model(state, runtime):
     )
     return None
 
-
-def log_chunk(chunk: dict) -> None:
-    if not isinstance(chunk, dict):
-        logger.info("Chunk: %s", str(chunk)[:1000])
-        return
-
-    for node, payload in chunk.items():
-        if payload is None:
-            logger.info("[%s] (no output)", node)
-            continue
-
-        # Payload might be an Overwrite/Append wrapper, a dict, or something else
-        if not isinstance(payload, dict):
-            logger.info("[%s] %s", node, str(payload)[:1000])
-            continue
-
-        # Drop noisy keys
-        payload = {k: v for k, v in payload.items() if k != "files"}
-
-        messages = payload.get("messages")
-        if messages is None:
-            # No messages field — just log keys touched
-            logger.info("[%s] keys=%s", node, list(payload.keys()))
-            continue
-
-        # messages might also be an Overwrite wrapper, not a list
-        if not isinstance(messages, list):
-            logger.info("[%s] messages=%s", node, str(messages)[:300])
-            continue
-
-        for msg in messages:
-            role = type(msg).__name__
-            content = getattr(msg, "content", "")
-            if not isinstance(content, str):
-                content = str(content)
-            preview = content[:300] + ("..." if len(content) > 300 else "")
-            logger.info("[%s] %s: %s", node, role, preview)
-
-
 @wrap_tool_call
 def tool_logger(request, handler):
     name = request.tool_call["name"]
@@ -165,42 +94,6 @@ def tool_logger(request, handler):
     truncated = content[:300] + ("..." if len(content) > 300 else "")
     logger.info("Tool result: %s", truncated)
     return result
-
-
-def _build_tenant_collection(tenant_flat: list[dict]):
-    """Build a throwaway in-memory ChromaDB collection from the tenant's flat settings.
-
-    Uses EphemeralClient so nothing is persisted to disk. Deduplicates by setting ID,
-    keeping the first occurrence. Returns the collection ready for querying.
-    """
-    client = chromadb.EphemeralClient()
-    ef = DefaultEmbeddingFunction()
-    col = client.create_collection(
-        "tenant_settings_tmp",
-        embedding_function=ef,
-        metadata={"hnsw:space": "cosine"},
-    )
-    seen: set[str] = set()
-    ids, docs, metas = [], [], []
-    for rec in tenant_flat:
-        sid = rec.get("id", "")
-        if not sid or sid in seen:
-            continue
-        seen.add(sid)
-        name = rec.get("name", sid)
-        desc = rec.get("description", "")
-        ids.append(sid)
-        docs.append(f"{name}. {desc}".strip())
-        metas.append({
-            "id": sid,
-            "name": name,
-            "description": desc[:200],
-            "configured_value_label": str(rec.get("configured_value_label") or ""),
-            "policy_name": rec.get("policy_name", ""),
-        })
-    if ids:
-        col.add(ids=ids, documents=docs, metadatas=metas)
-    return col
 
 
 @tool
@@ -626,8 +519,8 @@ def find_catalog_interdependencies(runtime: ToolRuntime) -> str:
     conflict_informational = [c for c in structural_conflicts if c.get("severity") == "informational"]
     all_findings = conflict_findings + unmet_catalog_prerequisites
 
-    # Print benchmark settings
-    print("\n=== Benchmark Settings — Catalog & Tenant Status ===\n")
+    # Build per-setting catalog & tenant status records
+    settings_catalog_status = []
     for sid in setting_ids:
         cat = catalog_hits.get(sid, {})
         parents = [
@@ -636,40 +529,38 @@ def find_catalog_interdependencies(runtime: ToolRuntime) -> str:
             if dep.get("parentSettingId") or dep.get("dependentOn")
         ]
         hits = tenant_index.get(sid, [])
-        print(f"[BENCHMARK SETTING]  {sid}")
-        print(f"  Name:        {cat.get('displayName') or cat.get('name', '(not in catalog)')}")
-        print(f"  Description: {(cat.get('description') or '')[:120]}")
-        print(f"  Depends on:  {parents if parents else 'none'}")
-        if hits:
-            for h in hits:
-                print(f"  Tenant:      policy='{h.get('policy_name')}' | value='{h.get('configured_value_label') or h.get('configured_value')}'")
-        else:
-            print("  Tenant:      NOT CONFIGURED")
-        print()
+        settings_catalog_status.append({
+            "setting_id": sid,
+            "name": cat.get("displayName") or cat.get("name") or "(not in catalog)",
+            "description": (cat.get("description") or "")[:120],
+            "in_catalog": bool(cat),
+            "depends_on": parents,
+            "tenant_status": "configured" if hits else "not_configured",
+            "tenant_occurrences": [
+                {
+                    "policy_name": h.get("policy_name"),
+                    "configured_value_label": h.get("configured_value_label") or h.get("configured_value"),
+                }
+                for h in hits
+            ],
+        })
 
-    if new_parent_ids:
-        print("--- Parent Settings ---\n")
-        for pid in sorted(new_parent_ids):
-            cat = parent_catalog_hits.get(pid, {})
-            hits = tenant_index.get(pid, [])
-            status = "CONFIGURED" if hits else "NOT CONFIGURED — unmet prerequisite"
-            print(f"[PARENT SETTING]  {pid}")
-            print(f"  Name:        {cat.get('displayName') or cat.get('name', '(not in catalog)')}")
-            print(f"  Tenant:      {status}")
-            if hits:
-                for h in hits:
-                    print(f"             policy='{h.get('policy_name')}' | value='{h.get('configured_value_label') or h.get('configured_value')}'")
-            print()
-
-    if conflict_findings:
-        print(f"\n--- Structural Conflicts ({len(conflict_findings)}) ---")
-        for f in conflict_findings:
-            print(f"  CONFLICT: {f['setting_name']} ({f['setting_id']}) — {f['reason']}")
-
-    if unmet_catalog_prerequisites:
-        print(f"\n--- Unmet Catalog Prerequisites ({len(unmet_catalog_prerequisites)}) ---")
-        for f in unmet_catalog_prerequisites:
-            print(f"  UNMET PREREQ: {f['setting_name']} missing parent '{f['missing_parent_name']}' ({f['missing_parent_id']})")
+    parent_catalog_status = []
+    for pid in sorted(new_parent_ids):
+        cat = parent_catalog_hits.get(pid, {})
+        hits = tenant_index.get(pid, [])
+        parent_catalog_status.append({
+            "setting_id": pid,
+            "name": cat.get("displayName") or cat.get("name") or "(not in catalog)",
+            "tenant_status": "configured" if hits else "not_configured",
+            "tenant_occurrences": [
+                {
+                    "policy_name": h.get("policy_name"),
+                    "configured_value_label": h.get("configured_value_label") or h.get("configured_value"),
+                }
+                for h in hits
+            ],
+        })
 
     return json.dumps({
         "summary": {
@@ -678,166 +569,24 @@ def find_catalog_interdependencies(runtime: ToolRuntime) -> str:
             "unmet_catalog_prerequisites": len(unmet_catalog_prerequisites),
             "informational_relationships": len(conflict_informational),
         },
+        "settings_catalog_status": settings_catalog_status,
+        "parent_catalog_status": parent_catalog_status,
         "findings": all_findings,
         "informational": conflict_informational,
-    }, indent=2, default=list)
-
-
-@tool
-def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
-    """Semantically match each security requirement from policy_requirements.json
-    against the tenant's configured settings and classify the relationship via LLM.
-
-    For each requirement, searches an in-memory ChromaDB collection built from the
-    tenant's own settings (avoiding catalog ID format mismatches), then asks the LLM
-    to classify each candidate as: satisfies, conflicts, partial, or prerequisite.
-
-    Only 'conflicts' are emitted as findings; the rest are informational.
-
-    Call this after find_catalog_interdependencies when deeper semantic analysis
-    of requirement coverage is needed.
-    """
-    # Load catalog and tenant independently
-    with open(SETTINGS_JSON) as f:
-        catalog = {s["id"]: s for s in json.load(f)}
-
-    tenant_path = os.path.join(
-        os.path.dirname(__file__), "../configurations/policies_and_settings_expand_assign.json"
-    )
-    with open(tenant_path) as f:
-        policies = json.load(f)
-
-    tenant_flat = flatten_for_relevance(policies, catalog)
-    tenant_index: dict[str, list[dict]] = {}
-    for s in tenant_flat:
-        tenant_index.setdefault(s["id"], []).append(s)
-
-    semantic_relationships: list[dict] = []
-    requirements: list[dict] = []
-
-    files = runtime.state.get("files", {})
-    file_entry = files.get("/policy_requirements.json") or files.get("policy_requirements.json")
-    if file_entry is None:
-        return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
-
-    if isinstance(file_entry, dict):
-        raw = file_entry.get("content", [])
-        requirements = "\n".join(raw) if isinstance(raw, list) else str(raw)
-    else:
-        requirements = str(file_entry)
-    try:
-        parsed = json.loads(requirements)
-    except json.JSONDecodeError:
-        import ast
-        parsed = ast.literal_eval(requirements)
-    req_list: list[dict] = parsed.get("requirements", parsed) if isinstance(parsed, dict) else parsed
-    
-
-    tenant_collection = _build_tenant_collection(tenant_flat)
-
-    for req in req_list[:30]:
-        query = f"{req.get('source_text', '')} {req.get('control_intent', '')}".strip()
-        try:
-            sem_results = tenant_collection.query(
-                query_texts=[query],
-                n_results=11,
-                include=["metadatas", "distances"],
-            )
-        except Exception:
-            continue
-
-        candidates = []
-        for meta, dist in zip(sem_results["metadatas"][0], sem_results["distances"][0]):
-            cid = meta.get("id", "")
-            score = round(1 - dist, 4)
-            if score < 0.65:
-                continue
-            tenant_hits_cid = tenant_index.get(cid, [])
-            candidates.append({
-                "id": cid,
-                "name": meta.get("name", cid),
-                "description": meta.get("description", ""),
-                "similarity_score": score,
-                "configured_value_label": tenant_hits_cid[0].get("configured_value_label") if tenant_hits_cid else None,
-                "configured_value": tenant_hits_cid[0].get("configured_value") if tenant_hits_cid else None,
-                "policy_name": meta.get("policy_name", ""),
-            })
-
-        if not candidates:
-            continue
-
-        requirement_summary = {
-            "requirement_id": req.get("requirement_id"),
-            "source_text": req.get("source_text"),
-            "security_domain": req.get("security_domain"),
-            "control_intent": req.get("control_intent"),
-            "expected_value": req.get("expected_value"),
-            "expected_unit": req.get("expected_unit"),
-        }
-        user_prompt = (
-            f"REQUIREMENT:\n{json.dumps(requirement_summary, indent=2)}\n\n"
-            f"TENANT SETTINGS:\n{json.dumps(candidates, indent=2)}\n\n"
-            "Classify each tenant setting's relationship to fulfilling this requirement."
-        )
-
-        response = model.invoke([
-            {"role": "system", "content": REQUIREMENT_CLASSIFY_SYSTEM},
-            {"role": "user", "content": user_prompt},
-        ])
-        content = response.content
-        if isinstance(content, list):
-            content = "".join(
-                b.get("text", "") if isinstance(b, dict) else str(b) for b in content
-            )
-        raw = (content or "").strip()
-        
-        if raw.startswith("```"):
-            raw = raw.replace("```json", "").replace("```", "").strip()
-
-        try:
-            classified = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-
-        for rel in classified:
-            rel["requirement_id"] = req.get("requirement_id")
-            rel["source_text"] = req.get("source_text")
-            rel["security_domain"] = req.get("security_domain")
-            semantic_relationships.append(rel)
-
-    semantic_findings = [r for r in semantic_relationships if r.get("severity") == "finding"]
-    semantic_informational = [r for r in semantic_relationships if r.get("severity") == "informational"]
-
-    if semantic_findings:
-        print(f"\n--- Requirement Conflicts ({len(semantic_findings)}) ---")
-        for f in semantic_findings:
-            print(f"  [CONFLICTS] {f.get('requirement_id')} ({f.get('security_domain', '')}) ↔ {f.get('candidate_name')}: {f.get('explanation', '')}")
-
-    return json.dumps({
-        "summary": {
-            "requirements_analyzed": len(requirements[:20]),
-            "semantic_findings": len(semantic_findings),
-            "informational_relationships": len(semantic_informational),
-        },
-        "findings": semantic_findings,
-        "informational": semantic_informational,
     }, indent=2, default=list)
 
 
 interdependency_agent = {
     "name": "interdependency_agent",
     "description": (
-        "Analyzes Intune security policy interdependencies and requirement compliance. "
-        "First calls find_catalog_interdependencies to detect structural conflicts and unmet prerequisites "
+        "Analyzes Intune security policy interdependencies. "
+        "Calls find_catalog_interdependencies to detect structural conflicts and unmet prerequisites "
         "among CIS benchmark settings and their catalog parents. "
-        "Then calls analyze_requirements_against_tenant to classify how tenant settings satisfy, "
-        "conflict with, or partially address each security requirement in policy_requirements.json. "
-        "Writes both result sets to files and produces a consolidated findings report."
     ),
     "system_prompt": ("""\
 You are an Intune security policy interdependency analyst embedded in a multi-agent security review workflow.
 
-Your job is to surface real configuration errors, gaps, and conflicts in the tenant by running two focused analyses in sequence.
+Your job is to surface real configuration errors and gaps in the tenant by running the structural analysis.
 
 ## Step 1 — Structural analysis (call find_catalog_interdependencies)
 
@@ -847,17 +596,9 @@ Call find_catalog_interdependencies with no arguments. It reads tenant_configs_v
 
 After the tool returns, write the full JSON result to a file named "catalog_interdependencies.json".
 
-## Step 2 — Requirements compliance analysis (call analyze_requirements_against_tenant)
+## Step 2 — Consolidated report
 
-Call analyze_requirements_against_tenant with no arguments. It reads policy_requirements.json and the tenant's own policies independently, then classifies each tenant setting's relationship to each security requirement:
-- conflicts: tenant setting is configured in a way that contradicts the requirement (severity=finding)
-- satisfies / partial / prerequisite: setting supports the requirement (severity=informational)
-
-After the tool returns, write the full JSON result to a file named "requirements_analysis_tenant.json".
-
-## Step 3 — Consolidated report
-
-After both tools complete, produce a structured findings report with three sections:
+Produce a structured findings report with two sections:
 
 ### Structural Conflicts
 List every entry from the structural_conflicts block. For each, state the setting name, the conflicting policies/groups, the differing values, and the severity.
@@ -865,20 +606,13 @@ List every entry from the structural_conflicts block. For each, state the settin
 ### Unmet Prerequisites
 List every entry from the unmet_catalog_prerequisites block. For each, state which benchmark setting depends on the missing parent and what the missing parent is.
 
-### Requirement Conflicts
-List every entry from the requirements analysis where relationship="conflicts". For each, state the requirement ID, the source text, the conflicting tenant setting, its configured value, and the explanation.
-
-### Informational
-Briefly summarise how many requirements are satisfied, partially addressed, or have prerequisites in place. No need to enumerate them individually unless the count is low (≤5).
-
 ## Rules
-- Always run both tools, even if Step 1 returns no findings — the requirement compliance check is independent.
 - Do not invent findings. Only report what the tools return.
-- If a tool returns an error, report it clearly and continue to the next step.
-- Severity="finding" entries belong in the findings sections above. Severity="informational" entries belong in the Informational summary.
+- If a tool returns an error, report it clearly.
+- Severity="finding" entries belong in the findings sections above. Severity="informational" entries belong in an Informational summary.
 """
     ),
-    "tools": [find_catalog_interdependencies, analyze_requirements_against_tenant],
+    "tools": [find_catalog_interdependencies],
 }
 
 int_agent_main = create_deep_agent(
@@ -887,11 +621,8 @@ int_agent_main = create_deep_agent(
     Your job is to find possible interdependencies and conflicts between Intune security configurations.
     1. Call find_catalog_interdependencies tool to find interdependencies from the different settings
     2. Use write file to write the results from find_catalog_interdependencies.
-    3. Call analyze_requirements_against_tenant to identify which tenant
-    settings conflict with or satisfy the security requirements.
-    4.  Use write file to write the results from analyze_requirements_against_tenant.
     """,
-    tools=[find_catalog_interdependencies, analyze_requirements_against_tenant]
+    tools=[find_catalog_interdependencies]
 )
 
 def _file_data(path: str) -> dict:
@@ -1159,9 +890,8 @@ if __name__ == "__main__":
 }
     
     result = int_agent_main.invoke({
-        "messages": [{"role": "user", "content": "Check interdependecies and compliance with the security policy"}],
+        "messages": [{"role": "user", "content": "Check interdependecies in the security configurations"}],
         "files": {
-            "policy_requirements.json": _file_data(os.path.join(os.path.dirname(__file__), "policy_requirements.json")),
             "tenant_configs_vs_benchmark.json": _file_data(os.path.join(os.path.dirname(__file__), "tenant_configs_vs_benchmark.json"))
         },
     })

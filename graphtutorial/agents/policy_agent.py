@@ -7,6 +7,9 @@ from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os
+from preprocessing_at_startup import flatten_for_relevance, build_tenant_collection
+from prompts import REQUIREMENT_CLASSIFY_SYSTEM
+
 
 load_dotenv()
 
@@ -38,7 +41,7 @@ class PolicySetting(BaseModel):
 
 class PolicyAgentResults(BaseModel):
     settings: list[PolicySetting] = Field(
-        description="All relevant Intune settings with similarity_score above 0.4"
+        description="All relevant Intune settings with similarity_score above 0.5"
     )
 
 def build_intune_vector_db(force_rebuild: bool = False):
@@ -342,130 +345,6 @@ Rules:
 """
 
 
-def _resolve_choice_label(defn: dict, chosen_id: str) -> tuple[str, list[str]]:
-    """Given a setting definition and a chosen option ID, return the
-    human-readable label and the full list of available option labels.
-    Returns (chosen_id, []) if the catalog has no options for this setting.
-    """
-    options = defn.get("options", []) if defn else []
-    if not options:
-        return chosen_id, []
-
-    option_map = {
-        o["itemId"]: (o.get("displayName") or o.get("name") or o["itemId"])
-        for o in options
-    }
-    label = option_map.get(chosen_id, chosen_id)
-    return label, list(option_map.values())
-
-
-def _walk_setting_instance(
-    instance: dict,
-    policy_info: dict,
-    catalog: dict,
-    parent_chain: list,
-    parent_chosen_label: str | None,
-    out: list,
-) -> None:
-    """Walk a settingInstance recursively, emitting one flat enriched record
-    per setting (parent and child alike). Each record includes catalog
-    metadata, a parent chain, and dependency condition info if applicable.
-    """
-    sid = instance.get("settingDefinitionId", "")
-    dtype = instance.get("@odata.type", "")
-    defn = catalog.get(sid)
-
-    # Determine the configured value and instance type
-    chosen_id = None
-    setting_type = "unknown"
-    available_options: list[str] = []
-
-    if "ChoiceSettingInstance" in dtype:
-        chosen_id = instance.get("choiceSettingValue", {}).get("value", "") or None
-        setting_type = "choice"
-    elif "SimpleSettingInstance" in dtype:
-        chosen_id = instance.get("simpleSettingValue", {}).get("value", "")
-        setting_type = "simple"
-    elif "SimpleSettingCollectionInstance" in dtype:
-        chosen_id = [
-            v.get("value")
-            for v in instance.get("simpleSettingCollectionValue", [])
-        ]
-        setting_type = "simpleCollection"
-    elif "GroupSettingCollectionInstance" in dtype or "GroupSettingInstance" in dtype:
-        chosen_id = None
-        setting_type = "group"
-
-    # Resolve a human-readable label for choice settings
-    label = str(chosen_id)
-    if setting_type == "choice" and chosen_id:
-        label, available_options = _resolve_choice_label(defn or {}, chosen_id)
-
-    # Build the record (only emit if this node has its own ID)
-    if sid:
-        record = {
-            "id": sid,
-            "name": (defn.get("displayName") or defn.get("name") or sid) if defn else sid,
-            "description": (defn.get("description") or defn.get("helpText") or "") if defn else "",
-            "platform": (defn.get("applicability", {}).get("platform", "") if defn else ""),
-            "type": setting_type,
-            "configured_value": chosen_id,
-            "configured_value_label": label,
-            "parent_setting_id": parent_chain[-1] if parent_chain else None,
-            "parent_chain": list(parent_chain),
-            "policy_name": policy_info["policy_name"],
-            "policy_id": policy_info["policy_id"],
-        }
-        if available_options:
-            record["available_options"] = available_options
-        if parent_chain:
-            record["dependency_condition"] = {
-                "parent_id": parent_chain[-1],
-                "parent_chosen_label": parent_chosen_label,
-                # `active` could be enriched later by interdependency_agent
-                # using catalog metadata about which parent values gate which children
-                "active_unknown": True,
-            }
-        #print(record)    
-        out.append(record)
-
-    # Recurse into children of this node, passing this node's label down
-    new_chain = parent_chain + [sid] if sid else parent_chain
-    new_parent_label = label if setting_type == "choice" else parent_chosen_label
-
-    if "ChoiceSettingInstance" in dtype:
-        for child in instance.get("choiceSettingValue", {}).get("children", []) or []:
-            _walk_setting_instance(child, policy_info, catalog, new_chain, new_parent_label, out)
-    elif "GroupSettingCollectionInstance" in dtype:
-        for group_val in instance.get("groupSettingCollectionValue", []) or []:
-            for child in group_val.get("children", []) or []:
-                _walk_setting_instance(child, policy_info, catalog, new_chain, new_parent_label, out)
-    elif "GroupSettingInstance" in dtype:
-        for child in instance.get("groupSettingValue", {}).get("children", []) or []:
-            _walk_setting_instance(child, policy_info, catalog, new_chain, new_parent_label, out)
-
-
-def flatten_for_relevance(raw_policies: list, catalog: dict) -> list:
-    """Walk every policy's settings tree and produce a flat list of enriched
-    records — one per configured setting (parent and child alike).
-    """
-    flat = []
-    for policy in raw_policies:
-        policy_info = {
-            "policy_name": policy.get("name", ""),
-            "policy_id": policy.get("id", ""),
-        }
-        for setting in policy.get("settings", []):
-            _walk_setting_instance(
-                setting.get("settingInstance", {}),
-                policy_info,
-                catalog,
-                parent_chain=[],
-                parent_chosen_label=None,
-                out=flat,
-            )
-    return flat
-
 @tool
 def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | None = None) -> str:
     """Identify which currently-configured Intune settings are relevant to
@@ -536,7 +415,156 @@ def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | 
             "raw_output": raw,
         }, indent=2)
 
+@tool
+def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
+    """Semantically match each security requirement from policy_requirements.json
+    against the tenant's configured settings and classify the relationship via LLM.
 
+    For each requirement, searches an in-memory ChromaDB collection built from the
+    tenant's own settings, then asks the LLM to classify each candidate as:
+    satisfies, conflicts, partial, or prerequisite.
+
+    Returns a list — one entry per requirement that has at least one matching
+    tenant setting above the similarity threshold. Requirements with no matches
+    are omitted. Each entry contains a 'tenant_matches' array.
+
+    Call this after find_configs_in_policies when deeper semantic analysis
+    of requirement coverage is needed.
+    """
+    with open(SETTINGS_JSON) as f:
+        catalog = {s["id"]: s for s in json.load(f)}
+
+    tenant_path = os.path.join(
+        os.path.dirname(__file__), "../configurations/policies_and_settings_expand_assign.json"
+    )
+    with open(tenant_path) as f:
+        policies = json.load(f)
+
+    tenant_flat = flatten_for_relevance(policies, catalog)
+    tenant_index: dict[str, list[dict]] = {}
+    for s in tenant_flat:
+        tenant_index.setdefault(s["id"], []).append(s)
+
+    files = runtime.state.get("files", {})
+    file_entry = files.get("/policy_requirements.json") or files.get("policy_requirements.json")
+    if file_entry is None:
+        return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
+
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        requirements_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
+    else:
+        requirements_str = str(file_entry)
+
+    try:
+        parsed = json.loads(requirements_str)
+    except json.JSONDecodeError:
+        import ast
+        parsed = ast.literal_eval(requirements_str)
+    req_list: list[dict] = parsed.get("requirements", parsed) if isinstance(parsed, dict) else parsed
+
+    tenant_collection = build_tenant_collection(platform="windows")
+
+    output: list[dict] = []
+    for req in req_list[:30]:
+        query = f"{req.get('source_text', '')} {req.get('control_intent', '')}".strip()
+        try:
+            sem_results = tenant_collection.query(
+                query_texts=[query],
+                n_results=25,
+                include=["metadatas", "distances"],
+            )
+        except Exception:
+            continue
+
+        candidates = []
+        for meta, dist in zip(sem_results["metadatas"][0], sem_results["distances"][0]):
+            cid = meta.get("id", "")
+            score = round(1 - dist, 4)
+            if score < 0.40:
+                continue
+            tenant_hits_cid = tenant_index.get(cid, [])
+            candidates.append({
+                "id": cid,
+                "name": meta.get("name", cid),
+                "description": meta.get("description", ""),
+                "similarity_score": score,
+                "configured_value_label": tenant_hits_cid[0].get("configured_value_label") if tenant_hits_cid else None,
+                "configured_value": tenant_hits_cid[0].get("configured_value") if tenant_hits_cid else None,
+                "policy_name": meta.get("policy_name", ""),
+            })
+
+        if not candidates:
+            continue
+
+        score_by_id = {c["id"]: c["similarity_score"] for c in candidates}
+
+        requirement_summary = {
+            "requirement_id": req.get("requirement_id"),
+            "source_text": req.get("source_text"),
+            "security_domain": req.get("security_domain"),
+            "control_intent": req.get("control_intent"),
+            "expected_value": req.get("expected_value"),
+            "expected_unit": req.get("expected_unit"),
+        }
+        user_prompt = (
+            f"REQUIREMENT:\n{json.dumps(requirement_summary, indent=2)}\n\n"
+            f"TENANT SETTINGS:\n{json.dumps(candidates, indent=2)}\n\n"
+            "Classify each tenant setting's relationship to fulfilling this requirement."
+        )
+
+        response = model.invoke([
+            {"role": "system", "content": REQUIREMENT_CLASSIFY_SYSTEM},
+            {"role": "user", "content": user_prompt},
+        ])
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+            )
+        raw = (content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.replace("```json", "").replace("```", "").strip()
+
+        try:
+            classified = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        tenant_matches = []
+        for rel in classified:
+            cid = rel.get("candidate_id", "")
+            tenant_matches.append({
+                "setting_id": cid,
+                "setting_name": rel.get("candidate_name", ""),
+                "configured_value_label": rel.get("configured_value_label", ""),
+                "policy_name": rel.get("policy_name", ""),
+                "similarity_score": score_by_id.get(cid, 0.0),
+                "relationship": rel.get("relationship", ""),
+                "severity": rel.get("severity", "informational"),
+                "explanation": rel.get("explanation", ""),
+            })
+
+        output.append({
+            "requirement_id": req.get("requirement_id"),
+            "source_text": req.get("source_text"),
+            "security_domain": req.get("security_domain"),
+            "control_intent": req.get("control_intent"),
+            "tenant_matches": tenant_matches,
+        })
+
+    conflicts = [
+        (entry["requirement_id"], m)
+        for entry in output
+        for m in entry["tenant_matches"]
+        if m["severity"] == "finding"
+    ]
+    if conflicts:
+        print(f"\n--- Requirement Conflicts ({len(conflicts)}) ---")
+        for req_id, m in conflicts:
+            print(f"  [CONFLICTS] {req_id} ↔ {m['setting_name']}: {m['explanation']}")
+
+    return json.dumps(output, indent=2, default=list)
 policy_agent = {
     "name": "policy_agent",
     "description": (

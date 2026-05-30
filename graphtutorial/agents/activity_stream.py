@@ -398,7 +398,7 @@ def stream_activity(
             _consume_interleaved(run, emit)
         else:
             _consume_sequential(run, emit)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc: 
         emit(ActivityEvent(EventType.ERROR, "coordinator", text=str(exc)))
         raise
     finally:
@@ -484,7 +484,10 @@ async def astream_activity(
     finally:
         await emit(ActivityEvent(EventType.RUN_END, "coordinator"))
 
-    return getattr(run, "output", None)
+    output = getattr(run, "output", None)
+    if output is None:
+        return None
+    return await output() if callable(output) else output
 
 
 # -- async drains (mirror the sync ones, awaiting async iterators) ---------- #

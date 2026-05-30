@@ -1,6 +1,5 @@
 from langchain.chat_models import init_chat_model
 from langchain.agents.middleware import wrap_tool_call
-from deepagents.middleware.summarization import create_summarization_tool_middleware
 from deepagents import create_deep_agent
 from search_agent import search_agent
 from config_agent import config_agent
@@ -12,7 +11,6 @@ import json
 from pathlib import Path
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
-from agent_utils import stream_agent_v2
 from dotenv import load_dotenv
 import logging
 import os
@@ -68,46 +66,6 @@ def log_after_model(state, runtime):
         [tc["name"] for tc in tool_calls] if tool_calls else "none",
     )
     return None
-
-
-def log_chunk(chunk: dict) -> None:
-    if not isinstance(chunk, dict):
-        logger.info("Chunk: %s", str(chunk)[:1000])
-        return
-
-    for node, payload in chunk.items():
-        if payload is None:
-            logger.info("[%s] (no output)", node)
-            continue
-
-        # Payload might be an Overwrite/Append wrapper, a dict, or something else
-        if not isinstance(payload, dict):
-            logger.info("[%s] %s", node, str(payload)[:1000])
-            continue
-
-        # Drop noisy keys
-        payload = {k: v for k, v in payload.items() if k != "files"}
-
-        messages = payload.get("messages")
-        if messages is None:
-            # No messages field — just log keys touched
-            logger.info("[%s] keys=%s", node, list(payload.keys()))
-            continue
-
-        # messages might also be an Overwrite wrapper, not a list
-        if not isinstance(messages, list):
-            logger.info("[%s] messages=%s", node, str(messages)[:1000])
-            continue
-
-        for msg in messages:
-            role = type(msg).__name__
-            content = getattr(msg, "content", "")
-            if not isinstance(content, str):
-                content = str(content)
-            preview = content[:1000] + ("..." if len(content) > 1000 else "")
-            logger.info("[%s] %s: %s", node, role, preview)
-
-
 
 
 def _extract_task_content(result) -> str:
@@ -171,7 +129,7 @@ _run_dir.mkdir(parents=True, exist_ok=True)
 agent = create_deep_agent(
     model=model,
     middleware=[task_error_guard, log_before_model, log_after_model],
-    subagents=[policy_agent, cis_benchmark_agent],
+    subagents=[policy_agent, cis_benchmark_agent, config_agent, interdependency_agent],
     checkpointer=checkpointer,
     system_prompt = """
 You are a Microsoft Intune security supervisor. You orchestrate specialised subagents.
@@ -179,16 +137,23 @@ You are a Microsoft Intune security supervisor. You orchestrate specialised suba
 Delegate tasks to subagents using the `task` tool with this format:
 {
   "description": "What the subagent should do",
-  "subagent_type": "policy_agent" | "cis_benchmark_agent" 
+  "subagent_type": "policy_agent" | "config_agent" | "cis_benchmark_agent" | "interdependency_agent" 
 }
 
 After each subagent returns, use the write_tool to save the result to memory. Hence, write the result
-of each subagent in a file "[subagent_name]_result.md" and save it as a file in memory.
+of each subagent in a file "[subagent_type]_result.md" and save it as a file in memory.
 
 PROCESS (follow all steps in order):
   Step 1: Delegate to policy_agent to extract all the requirements from the security policy.
-  Step 2: Delegate to cis_benchmark_agent to check if the configurations are compliant to the CIS Benchmark.
-  Step 3: After the table, write:
+  Step 2: Delegate to config_agent to find all security settings that match the requirements from the security policy.
+  Step 3: Delegate to cis_benchmark_agent to check if the configurations are compliant to the CIS Benchmark.
+  Step 4: Delegate to interdependency_agent. 
+          Check whether there would be any conflicts or other interdependencies among the settings.
+  Step 5: 
+  Step 5: Present results as a markdown table with EXACTLY these columns:
+          | Setting | Configured | Recommended | Status | Dependencies | Policy Name |
+          Status must be one of: COMPLIANT, NON-COMPLIANT, NOT CONFIGURED.
+  Step 6: After the table, write:
           - A "Remediation" section listing each NON-COMPLIANT setting with its remediation path from CIS.
           - Any interdependency warnings from Step 4.
           - A note flagging which rows used web search and what the recommendation from Microsoft is.
@@ -205,13 +170,8 @@ Do not wrap the output in JSON. Do not skip the table.
 
 )
 
-promtp = """Step 3: Delegate to interdependency_agent. 
-          Check whether there would be any conflicts or other interdependencies among the settings.
-  Step 4: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
-          In the description, tell it to read tenant_configs_vs_benchmark.json.json for the full settings list.
-  Step 5: Present results as a markdown table with EXACTLY these columns:
-          | Setting | Configured | Recommended | Status | Dependencies | Policy Name |
-          Status must be one of: COMPLIANT, NON-COMPLIANT, NOT CONFIGURED."""
+prompt= """ Step 4: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
+          In the description, tell it to read tenant_configs_vs_benchmark.json.json for the full settings list."""
 
 query = "What are the best practices for password configurations in Microsoft Intune for Windows 11 devices?"
 

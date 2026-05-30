@@ -68,45 +68,6 @@ def log_after_model(state, runtime):
     )
     return None
 
-
-def log_chunk(chunk: dict) -> None:
-    if not isinstance(chunk, dict):
-        logger.info("Chunk: %s", str(chunk)[:1000])
-        return
-
-    for node, payload in chunk.items():
-        if payload is None:
-            logger.info("[%s] (no output)", node)
-            continue
-
-        # Payload might be an Overwrite/Append wrapper, a dict, or something else
-        if not isinstance(payload, dict):
-            logger.info("[%s] %s", node, str(payload)[:1000])
-            continue
-
-        # Drop noisy keys
-        payload = {k: v for k, v in payload.items() if k != "files"}
-
-        messages = payload.get("messages")
-        if messages is None:
-            # No messages field — just log keys touched
-            logger.info("[%s] keys=%s", node, list(payload.keys()))
-            continue
-
-        # messages might also be an Overwrite wrapper, not a list
-        if not isinstance(messages, list):
-            logger.info("[%s] messages=%s", node, str(messages)[:300])
-            continue
-
-        for msg in messages:
-            role = type(msg).__name__
-            content = getattr(msg, "content", "")
-            if not isinstance(content, str):
-                content = str(content)
-            preview = content[:300] + ("..." if len(content) > 300 else "")
-            logger.info("[%s] %s: %s", node, role, preview)
-
-
 @wrap_tool_call
 def tool_logger(request, handler):
     name = request.tool_call["name"]
@@ -801,11 +762,205 @@ def compare_search_results_to_tenant( runtime: ToolRuntime ) -> str:
     return json.dumps({"summary": summary, "results": results}, indent=2)
 
 
+@tool
+def compare_requirements_results(runtime: ToolRuntime) -> str:
+    """Unified compliance check merging both requirements search outputs.
+
+    Reads requirements_vs_benchmark.json (output of search_cis_benchmark) and
+    requirements_analysis_tenant.json (output of analyze_requirements_against_tenant),
+    collects the union of all unique setting_definition_ids, and for each setting:
+    - Looks up its CIS benchmark reference value from matched_all_level1.json
+    - Looks up its configured value(s) from the tenant's policies JSON
+    - Determines compliance status and records which search(es) surfaced it
+
+    Compliance statuses:
+      compliant              - tenant value satisfies the CIS recommendation
+      non_compliant          - tenant value deviates from the CIS recommendation
+      not_configured         - setting has a CIS reference but is absent from all tenant policies
+      no_benchmark_reference - setting is in tenant but has no CIS benchmark entry
+    """
+    files = runtime.state.get("files", {})
+
+    def _load_entry(key: str):
+        entry = files.get(f"/{key}") or files.get(key)
+        if entry is None:
+            return None
+        if isinstance(entry, dict):
+            raw = entry.get("content", [])
+            s = "\n".join(raw) if isinstance(raw, list) else str(raw)
+        else:
+            s = str(entry)
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            import ast
+            return ast.literal_eval(s)
+
+    bench_data = _load_entry("requirements_vs_benchmark.json") or []
+    tenant_req_data = _load_entry("requirements_analysis_tenant.json") or []
+
+    if not bench_data and not tenant_req_data:
+        return json.dumps({
+            "error": (
+                "Neither requirements_vs_benchmark.json nor requirements_analysis_tenant.json "
+                "found. Run search_cis_benchmark and/or analyze_requirements_against_tenant first."
+            )
+        })
+
+    # Collect unique setting IDs with provenance and requirement linkage
+    settings: dict[str, dict] = {}
+
+    for req in bench_data:
+        req_id = req.get("requirement_id", "")
+        for match in req.get("cis_matches", []):
+            sid = match.get("setting_definition_id")
+            if not sid:
+                continue
+            if sid not in settings:
+                settings[sid] = {"requirement_ids": [], "found_via": set()}
+            settings[sid]["found_via"].add("benchmark_search")
+            if req_id and req_id not in settings[sid]["requirement_ids"]:
+                settings[sid]["requirement_ids"].append(req_id)
+
+    for req in tenant_req_data:
+        req_id = req.get("requirement_id", "")
+        for match in req.get("tenant_matches", []):
+            sid = match.get("setting_id")  # config_agent uses "setting_id"
+            if not sid:
+                continue
+            if sid not in settings:
+                settings[sid] = {"requirement_ids": [], "found_via": set()}
+            settings[sid]["found_via"].add("tenant_search")
+            if req_id and req_id not in settings[sid]["requirement_ids"]:
+                settings[sid]["requirement_ids"].append(req_id)
+
+    if not settings:
+        return json.dumps({"error": "No setting IDs found in either search output."})
+
+    base = os.path.dirname(__file__)
+
+    # Enrich with full CIS benchmark details
+    cis_benchmark_path = os.path.join(base, "../configurations/cis_benchmarks/matched_all_level1.json")
+    with open(cis_benchmark_path) as f:
+        cis_data = json.load(f)
+    cis_details: dict[str, dict] = {}
+    for policy in cis_data.get("policies", []):
+        policy_name = policy["policy_metadata"]["intune_policy_name"]
+        for item in policy.get("matched_configurations", []):
+            sid = item.get("setting_definition_id", "")
+            if not sid or sid in cis_details:
+                continue
+            rec = item.get("cis_benchmark", {})
+            cis_details[sid] = {
+                "cis_id": rec.get("Recommendation #", ""),
+                "cis_title": rec.get("Title", ""),
+                "cis_reference_value_display": str(item.get("configured_value", "")),
+                "cis_raw_value": str(item.get("raw_value", "")),
+                "operator": _resolve_operator(item.get("operator", "=="), rec.get("Title", "")),
+                "rationale": rec.get("Rationale Statement", ""),
+                "impact": rec.get("Impact Statement", ""),
+                "remediation": rec.get("Remediation Procedure", ""),
+                "benchmark_policy": policy_name,
+            }
+
+    # Build tenant setting index
+    policies_path = os.path.join(base, "../configurations/policies_and_settings_expand_assign.json")
+    with open(policies_path) as f:
+        policies = json.load(f)
+    setting_index: dict[str, list[dict]] = {}
+    for policy in policies:
+        policy_settings: list[dict] = []
+        for setting in policy.get("settings", []):
+            _collect_settings(setting.get("settingInstance", {}), policy_settings)
+        for s in policy_settings:
+            sid = s["setting_definition_id"]
+            setting_index.setdefault(sid, []).append({
+                "policy_name": policy.get("name", ""),
+                "policy_id": policy.get("id", ""),
+                "raw_value": s["raw_value"],
+                "value_type": s["value_type"],
+            })
+
+    results = []
+    for sid, info in settings.items():
+        found_via = sorted(info["found_via"])
+        cis = cis_details.get(sid)
+        tenant_hits = setting_index.get(sid, [])
+
+        tenant_status = "configured" if tenant_hits else "not_configured"
+        cis_status = "has_benchmark" if cis else "no_benchmark_reference"
+
+        if not tenant_hits:
+            compliance_status = "not_configured"
+        elif not cis:
+            compliance_status = "no_benchmark_reference"
+        else:
+            operator = cis["operator"]
+            cis_raw = cis["cis_raw_value"]
+            all_compliant = all(
+                check_compliance(h["raw_value"], cis_raw, operator) for h in tenant_hits
+            )
+            compliance_status = "compliant" if all_compliant else "non_compliant"
+
+        if cis and tenant_hits:
+            operator = cis["operator"]
+            cis_raw = cis["cis_raw_value"]
+            tenant_configurations = [
+                {**h, "compliant": check_compliance(h["raw_value"], cis_raw, operator)}
+                for h in tenant_hits
+            ]
+        else:
+            tenant_configurations = tenant_hits
+
+        record: dict = {
+            "setting_definition_id": sid,
+            "matched_by_requirements": info["requirement_ids"],
+            "found_via": found_via,
+            "tenant_status": tenant_status,
+            "cis_status": cis_status,
+            "compliance_status": compliance_status,
+        }
+
+        if cis:
+            cis_block: dict = {
+                "cis_id": cis["cis_id"],
+                "cis_title": cis["cis_title"],
+                "cis_reference_value": cis["cis_raw_value"],
+                "cis_reference_value_display": cis["cis_reference_value_display"],
+                "operator": cis["operator"],
+                "benchmark_policy": cis["benchmark_policy"],
+            }
+            if compliance_status == "non_compliant":
+                cis_block["rationale"] = cis["rationale"]
+                cis_block["impact"] = cis["impact"]
+                cis_block["remediation"] = cis["remediation"]
+            record["cis_benchmark"] = cis_block
+
+        record["tenant_configurations"] = tenant_configurations
+        results.append(record)
+
+    status_order = {"non_compliant": 0, "not_configured": 1, "no_benchmark_reference": 2, "compliant": 3}
+    results.sort(key=lambda r: status_order.get(r["compliance_status"], 4))
+
+    summary = {
+        "total": len(results),
+        "compliant": sum(1 for r in results if r["compliance_status"] == "compliant"),
+        "non_compliant": sum(1 for r in results if r["compliance_status"] == "non_compliant"),
+        "not_configured": sum(1 for r in results if r["compliance_status"] == "not_configured"),
+        "no_benchmark_reference": sum(1 for r in results if r["compliance_status"] == "no_benchmark_reference"),
+        "found_via_benchmark_search_only": sum(1 for r in results if r["found_via"] == ["benchmark_search"]),
+        "found_via_tenant_search_only": sum(1 for r in results if r["found_via"] == ["tenant_search"]),
+        "found_via_both": sum(1 for r in results if len(r["found_via"]) == 2),
+    }
+    return json.dumps({"summary": summary, "results": results}, indent=2)
+
+
 cis_benchmark_agent = {
     "name": "cis_benchmark_agent",
     "description": (
-        "Compares the tenant's relevant configured settings against CIS benchmarks. "
-        "Reads relevant_configs.json written by config_agent and produces a compliance report."
+        "Compares the tenant's configured settings against CIS benchmarks. "
+        "First analyzes the CIS recommended settings that match with the requirements."
+        "Then checks if the tenant's settings are compliant with the CIS recommended settings."
     ),
     "system_prompt": (
        "You are a CIS Benchmark compliance analyst for Microsoft Intune. "
@@ -818,10 +973,10 @@ cis_benchmark_agent = {
         "per requirement.\n"
         "2. Use the write_file tool and write the exact result fron search_cis_benchmark() into a file"
         "called 'requirements_vs_benchmark.json'"
-        "3. Call to compare_search_results_to_tenant() — "
+        "3. Call to compare_requirements_results() — "
         "it checks each matched CIS control against the tenant's configured policies "
         "and returns a compliance verdict per setting.\n"
-        "4. Use the write_file tool and write the exact result of compare_search_results_to_tenant()"
+        "4. Use the write_file tool and write the exact result of compare_requirements_results()"
         " into a file called 'tenant_configs_vs_benchmark.json'"
         "5. Present results as a compliance table with columns:\n"
         "   Requirement ID | CIS ID | Setting | Configured Value | "
@@ -830,6 +985,7 @@ cis_benchmark_agent = {
         "   - COMPLIANT: tenant value satisfies the CIS recommendation\n"
         "   - NON-COMPLIANT: tenant value deviates from the CIS recommendation\n"
         "   - NOT CONFIGURED: CIS recommends this setting but it is absent from all tenant policies\n"
+        "   - NOT IN BENCHMARK: There is no CIS recommendation for the setting configured in the tenant"
 
         "## For each NON-COMPLIANT setting\n"
         "- State the current tenant value and the CIS recommended value.\n"
@@ -844,7 +1000,7 @@ cis_benchmark_agent = {
         "Only use data from tool output. "
         "Do not generate remediation steps from your own knowledge."
     ),
-    "tools": [search_cis_benchmark, compare_search_results_to_tenant],
+    "tools": [search_cis_benchmark, compare_requirements_results],
 }
 
 benchmark_agent = create_deep_agent(
@@ -887,7 +1043,7 @@ benchmark_agent = create_deep_agent(
         "Do not generate remediation steps from your own knowledge."
     ),
     model=model,
-    tools=[search_cis_benchmark, compare_search_results_to_tenant])
+    tools=[search_cis_benchmark, compare_search_results_to_tenant, compare_requirements_results])
 
 def _file_data(path: str) -> dict:
     """Wrap a file's content in the FileData format deepagents expects."""

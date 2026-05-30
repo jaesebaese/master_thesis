@@ -3,8 +3,8 @@ from langchain.tools import tool, ToolRuntime
 from typing import List
 import json
 import os
-from policy_agent import PolicyAgentResults
-
+from policy_agent import PolicyAgentResults, SETTINGS_JSON
+from preprocessing_at_startup import build_tenant_collection, flatten_for_relevanceOPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
 OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
 
 
@@ -255,50 +255,117 @@ def analyze_configs() -> str:
 
 
 
+@tool
+def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
+    """Semantically match each security requirement from policy_requirements.json
+    against the tenant's configured settings via a single batched vector search.
+
+    Mirrors search_cis_benchmark's approach: all requirement queries are sent to
+    ChromaDB in one call, no LLM step. Returns a list — one entry per requirement
+    (including those with no matches, which get an empty tenant_matches array) —
+    each with a 'tenant_matches' array of the most similar tenant settings.
+
+    Each match includes: setting_id, setting_name, configured_value_label,
+    configured_value, policy_name, similarity_score.
+    """
+    with open(SETTINGS_JSON) as f:
+        catalog = {s["id"]: s for s in json.load(f)}
+
+    tenant_path = os.path.join(
+        os.path.dirname(__file__), "../configurations/policies_and_settings_expand_assign.json"
+    )
+    with open(tenant_path) as f:
+        policies = json.load(f)
+
+    tenant_flat = flatten_for_relevance(policies, catalog)
+    tenant_index: dict[str, list[dict]] = {}
+    for s in tenant_flat:
+        tenant_index.setdefault(s["id"], []).append(s)
+
+    files = runtime.state.get("files", {})
+    file_entry = files.get("/policy_requirements.json") or files.get("policy_requirements.json")
+    if file_entry is None:
+        return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
+
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        requirements_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
+    else:
+        requirements_str = str(file_entry)
+
+    try:
+        parsed = json.loads(requirements_str)
+    except json.JSONDecodeError:
+        import ast
+        parsed = ast.literal_eval(requirements_str)
+    req_list: list[dict] = parsed.get("requirements", parsed) if isinstance(parsed, dict) else parsed
+
+    tenant_collection = build_tenant_collection(platform="windows")
+
+    query_texts = [
+        f"{r.get('source_text', '')} {r.get('control_intent', '')}".strip()
+        for r in req_list
+    ]
+    batch_results = tenant_collection.query(
+        query_texts=query_texts,
+        n_results=5,
+        include=["metadatas", "distances"],
+    )
+
+    output = []
+    for req, metadatas, distances in zip(req_list, batch_results["metadatas"], batch_results["distances"]):
+        matches = []
+        for meta, dist in zip(metadatas, distances):
+            score = round(1 - dist, 4)
+            if score < 0.50:
+                continue
+            cid = meta.get("id", "")
+            tenant_hits = tenant_index.get(cid, [])
+            matches.append({
+                "setting_id": cid,
+                "setting_name": meta.get("name", cid),
+                "configured_value_label": meta.get("configured_value_label", ""),
+                "configured_value": tenant_hits[0].get("configured_value") if tenant_hits else None,
+                "policy_name": meta.get("policy_name", ""),
+                "similarity_score": score,
+            })
+        output.append({
+            "requirement_id": req.get("requirement_id"),
+            "source_text": req.get("source_text"),
+            "security_domain": req.get("security_domain"),
+            "control_intent": req.get("control_intent"),
+            "tenant_matches": matches,
+        })
+
+    return json.dumps(output, indent=2)
+
+
 config_agent = {
     "name": "config_agent",
     "description": (
         "Retrieves and analyzes Intune configuration policies. "
-        "Use the analyze_configs tool to get detailed explanations of currently configured policies and settings in the tenant. "
+        "Use analyze_requirements_against_tenant to semantically match security requirements "
+        "against the tenant's configured settings via vector search."
     ),
     "system_prompt": (
         "You are a Microsoft Intune configuration analyst. "
         "Your job is to retrieve and explain what is currently configured "
         "in the tenant — never answer from memory.\n\n"
 
-        "## Tool selection\n"
-        "- To check which policy settings are configured in the tenant: "
-        "call find_configs_in_policies() with NO arguments — it reads "
-        "policy_results.json written by policy_agent automatically. "
-        "Return 'found' items as CONFIGURED and 'missing' items as NOT CONFIGURED.\n"
-        "- If the user asks for an OVERVIEW of all policies or wants to know "
-        "what policies exist: call analyze_configs.\n"
+        "## Requirements compliance\n"
+        "To check how well the tenant satisfies the security policy requirements, "
+        "call analyze_requirements_against_tenant (no arguments). "
+        "It reads policy_requirements.json from the virtual filesystem and returns a list — "
+        "one entry per requirement — each with a 'tenant_matches' array of the most similar "
+        "tenant settings. Each match has: setting_id, setting_name, configured_value_label, "
+        "configured_value, policy_name, similarity_score.\n "
+        "IMPORTANT: After the tool returns, write the full JSON result to a new file with the name: 'requirements_analysis_tenant.json'.\n"
+        "For each requirement, report which settings matched and their configured values.\n\n"
 
-        "## When explaining a policy\n"
-        "For each setting in the returned JSON:\n"
-        "1. State the setting name and what it controls.\n"
-        "2. State the currently configured value and its security effect.\n"
-        "3. If 'available_options' is present, note which option was chosen "
-        "and why it matters from a security perspective.\n"
-        "4. If 'depends_on' is present, note that this setting requires "
-        "another setting to be active — flag this as a dependency.\n"
-        "5. If 'activates' is present, note that this setting enables "
-        "child settings — list them.\n\n"
-
-        "## Output structure\n"
-        "Group settings by category (e.g. BitLocker, Firewall, Defender). "
-        "End with a one-paragraph security posture summary. "
-        "Be precise but avoid unexplained acronyms.\n\n"
-
-        "## Saving output\n"
-        "After calling find_configs_in_policies(), call write_file with:\n"
-        "  path: 'relevant_configs.json'\n"
-        "  content: the raw JSON string returned by find_configs_in_policies\n"
-        "Do this before summarising the results."
     ),
-    "tools": [find_configs_in_policies, analyze_configs],
+    "tools": [analyze_requirements_against_tenant],
 }
 
-"""if __name__ == "__main__":
-    result = analyze_configs.invoke()
-    print(result)"""
+if __name__ == "__main__":
+    result = analyze_requirements_against_tenant.invoke({"messages": [{"role": "user"}]})
+    print(result)
