@@ -18,6 +18,9 @@ import time
 from activity_stream import astream_activity
 from rich_renderer import RichRenderer
 import asyncio
+import time
+from contextvars import ContextVar
+from langchain.agents.middleware import before_model, after_model
 
 
 
@@ -34,10 +37,6 @@ logging.basicConfig(
     handlers=[
         logging.FileHandler("agent.log", mode='w'),
     ],)
-
-import time
-from contextvars import ContextVar
-from langchain.agents.middleware import before_model, after_model
 
 _start = ContextVar("model_start", default=None)
 
@@ -129,7 +128,7 @@ _run_dir.mkdir(parents=True, exist_ok=True)
 agent = create_deep_agent(
     model=model,
     middleware=[task_error_guard, log_before_model, log_after_model],
-    subagents=[policy_agent, cis_benchmark_agent, config_agent, interdependency_agent],
+    subagents=[policy_agent, cis_benchmark_agent, config_agent, interdependency_agent, search_agent],
     checkpointer=checkpointer,
     system_prompt = """
 You are a Microsoft Intune security supervisor. You orchestrate specialised subagents.
@@ -137,7 +136,7 @@ You are a Microsoft Intune security supervisor. You orchestrate specialised suba
 Delegate tasks to subagents using the `task` tool with this format:
 {
   "description": "What the subagent should do",
-  "subagent_type": "policy_agent" | "config_agent" | "cis_benchmark_agent" | "interdependency_agent" 
+  "subagent_type": "policy_agent" | "config_agent" | "cis_benchmark_agent" | "interdependency_agent" | "search_agent"
 }
 
 After each subagent returns, use the write_tool to save the result to memory. Hence, write the result
@@ -149,11 +148,11 @@ PROCESS (follow all steps in order):
   Step 3: Delegate to cis_benchmark_agent to check if the configurations are compliant to the CIS Benchmark.
   Step 4: Delegate to interdependency_agent. 
           Check whether there would be any conflicts or other interdependencies among the settings.
-  Step 5: 
-  Step 5: Present results as a markdown table with EXACTLY these columns:
+  Step 5: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
+  Step 6: Present results as a markdown table with EXACTLY these columns:
           | Setting | Configured | Recommended | Status | Dependencies | Policy Name |
           Status must be one of: COMPLIANT, NON-COMPLIANT, NOT CONFIGURED.
-  Step 6: After the table, write:
+  Step 7: After the table, write:
           - A "Remediation" section listing each NON-COMPLIANT setting with its remediation path from CIS.
           - Any interdependency warnings from Step 4.
           - A note flagging which rows used web search and what the recommendation from Microsoft is.
@@ -169,9 +168,6 @@ Do not wrap the output in JSON. Do not skip the table.
 """,
 
 )
-
-prompt= """ Step 4: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
-          In the description, tell it to read tenant_configs_vs_benchmark.json.json for the full settings list."""
 
 query = "What are the best practices for password configurations in Microsoft Intune for Windows 11 devices?"
 

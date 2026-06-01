@@ -1001,6 +1001,7 @@ cis_benchmark_agent = {
         "Do not generate remediation steps from your own knowledge."
     ),
     "tools": [search_cis_benchmark, compare_requirements_results],
+    "model": model,
 }
 
 benchmark_agent = create_deep_agent(

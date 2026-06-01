@@ -1,15 +1,18 @@
+import asyncio
+
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
 from typing import List
 import json
 import os
+from activity_stream import astream_activity
+from rich_renderer import RichRenderer
 from policy_agent import PolicyAgentResults, _get_intune_collection, SETTINGS_JSON
 from preprocessing_at_startup import flatten_for_relevance
 from deepagents import create_deep_agent
 import logging
 import time
 from contextvars import ContextVar
-from langchain.agents.middleware import before_model, after_model, wrap_tool_call
 
 
 OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
@@ -59,41 +62,6 @@ logging.basicConfig(
     handlers=[
         logging.FileHandler("agent.log", mode='w'),  # overwrite log file on each run
     ],)
-
-@before_model
-def log_before_model(state, runtime):
-    _start.set(time.time())
-    return None
-
-@after_model
-def log_after_model(state, runtime):
-    started = _start.get()
-    elapsed = time.time() - started if started else 0
-    last_msg = state["messages"][-1]
-    
-    tool_calls = getattr(last_msg, "tool_calls", None) or []
-    usage = getattr(last_msg, "usage_metadata", None) or {}
-    
-    content = getattr(last_msg, "content", "") or ""
-    logger.info(
-        "← Model call done in %.2fs | tokens=%s | tool_calls=%s\n%s",
-        elapsed,
-        f"{usage.get('input_tokens', '?')}→{usage.get('output_tokens', '?')}",
-        [tc["name"] for tc in tool_calls] if tool_calls else "none",
-        content[:4000] + ("..." if len(content) > 4000 else ""),
-    )
-    return None
-
-@wrap_tool_call
-def tool_logger(request, handler):
-    name = request.tool_call["name"]
-    args = request.tool_call["args"]
-    logger.info("Tool call: %s args=%s", name, args)
-    result = handler(request)
-    content = result.content if hasattr(result, "content") else str(result)
-    truncated = content[:300] + ("..." if len(content) > 300 else "")
-    logger.info("Tool result: %s", truncated)
-    return result
 
 
 @tool
@@ -613,6 +581,7 @@ List every entry from the unmet_catalog_prerequisites block. For each, state whi
 """
     ),
     "tools": [find_catalog_interdependencies],
+    "model": model,
 }
 
 int_agent_main = create_deep_agent(
@@ -622,7 +591,7 @@ int_agent_main = create_deep_agent(
     1. Call find_catalog_interdependencies tool to find interdependencies from the different settings
     2. Use write file to write the results from find_catalog_interdependencies.
     """,
-    tools=[find_catalog_interdependencies]
+    tools=[find_catalog_interdependencies],
 )
 
 def _file_data(path: str) -> dict:
@@ -635,8 +604,7 @@ def _file_data(path: str) -> dict:
 
 
 if __name__ == "__main__":
-    logger = logging.getLogger(__name__)
-
+    
     benchmark_output = {
   "summary": {
     "total": 10,
@@ -888,10 +856,19 @@ if __name__ == "__main__":
     }
   ]
 }
-    
-    result = int_agent_main.invoke({
+    logger = logging.getLogger(__name__)
+    renderer = RichRenderer(logger=logger)
+
+    #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
+    pending = {
         "messages": [{"role": "user", "content": "Check interdependecies in the security configurations"}],
         "files": {
             "tenant_configs_vs_benchmark.json": _file_data(os.path.join(os.path.dirname(__file__), "tenant_configs_vs_benchmark.json"))
         },
-    })
+    }
+    run_config = {"configurable": {"thread_id": "1"}}
+
+    final_state = asyncio.run(
+        astream_activity(int_agent_main, agent_input=pending, config=run_config, render=False, on_event=renderer)
+    )
+    print("\nFINAL STATE:\n" + json.dumps(final_state, indent=2))

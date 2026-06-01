@@ -4,7 +4,8 @@ from typing import List
 import json
 import os
 from policy_agent import PolicyAgentResults, SETTINGS_JSON
-from preprocessing_at_startup import build_tenant_collection, flatten_for_relevanceOPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
+from preprocessing_at_startup import build_tenant_collection, flatten_for_relevance
+
 OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
 
 
@@ -364,6 +365,7 @@ config_agent = {
 
     ),
     "tools": [analyze_requirements_against_tenant],
+    "model": model,
 }
 
 if __name__ == "__main__":

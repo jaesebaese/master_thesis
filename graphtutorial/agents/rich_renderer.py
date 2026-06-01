@@ -305,13 +305,16 @@ class RichRenderer:
             body = _fmt_task(inp)
 
         elif depth > 0:
+            unwrapped = _unwrap_tool_message(raw)
+            # Convert Python repr whitespace escapes so json.loads and splitlines work
+            parseable = unwrapped.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
             try:
-                pretty = json.dumps(json.loads(_unwrap_tool_message(raw)), indent=2, ensure_ascii=False)
+                pretty = json.dumps(json.loads(parseable), indent=2, ensure_ascii=False)
             except (json.JSONDecodeError, TypeError):
-                pretty = raw
+                pretty = parseable
             all_lines = pretty.splitlines()
-            lines = all_lines[:5]
-            if len(all_lines) > 5:
+            lines = all_lines[:10]
+            if len(all_lines) > 10:
                 lines.append("…")
             body = Text("\n".join(lines))
         else:

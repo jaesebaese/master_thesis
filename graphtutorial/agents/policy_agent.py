@@ -585,6 +585,7 @@ provided security policy.
 """
     ),
     "tools": [policy_requirement_extractor],
+    "model": model,
 }
 
 
