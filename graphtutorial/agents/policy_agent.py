@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os
 from preprocessing_at_startup import flatten_for_relevance, build_tenant_collection
-from prompts import REQUIREMENT_CLASSIFY_SYSTEM
 
 
 load_dotenv()
@@ -263,6 +262,7 @@ def policy_requirement_extractor(runtime: ToolRuntime) -> str:
             "security_domain": "security_policy | encryption | firewall | antivirus | authentication | update_management | device_compliance | data_protection | access_control | other",
             "control_intent": "short_snake_case_description_of_the_control_goal",
             "expected_value": "specific required value, boolean, number, or null if not specified",
+            "operator": "minimum | maximum | exactly | null (if not a measurable quantity)",
             "expected_unit": "characters | days | attempts | versions | enabled_disabled | other | null",
             "applicability": "who or what the requirement applies to, or null",
             "strength": "mandatory | recommended | prohibited | informational",
@@ -415,156 +415,7 @@ def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | 
             "raw_output": raw,
         }, indent=2)
 
-@tool
-def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
-    """Semantically match each security requirement from policy_requirements.json
-    against the tenant's configured settings and classify the relationship via LLM.
 
-    For each requirement, searches an in-memory ChromaDB collection built from the
-    tenant's own settings, then asks the LLM to classify each candidate as:
-    satisfies, conflicts, partial, or prerequisite.
-
-    Returns a list — one entry per requirement that has at least one matching
-    tenant setting above the similarity threshold. Requirements with no matches
-    are omitted. Each entry contains a 'tenant_matches' array.
-
-    Call this after find_configs_in_policies when deeper semantic analysis
-    of requirement coverage is needed.
-    """
-    with open(SETTINGS_JSON) as f:
-        catalog = {s["id"]: s for s in json.load(f)}
-
-    tenant_path = os.path.join(
-        os.path.dirname(__file__), "../configurations/policies_and_settings_expand_assign.json"
-    )
-    with open(tenant_path) as f:
-        policies = json.load(f)
-
-    tenant_flat = flatten_for_relevance(policies, catalog)
-    tenant_index: dict[str, list[dict]] = {}
-    for s in tenant_flat:
-        tenant_index.setdefault(s["id"], []).append(s)
-
-    files = runtime.state.get("files", {})
-    file_entry = files.get("/policy_requirements.json") or files.get("policy_requirements.json")
-    if file_entry is None:
-        return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
-
-    if isinstance(file_entry, dict):
-        raw = file_entry.get("content", [])
-        requirements_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
-    else:
-        requirements_str = str(file_entry)
-
-    try:
-        parsed = json.loads(requirements_str)
-    except json.JSONDecodeError:
-        import ast
-        parsed = ast.literal_eval(requirements_str)
-    req_list: list[dict] = parsed.get("requirements", parsed) if isinstance(parsed, dict) else parsed
-
-    tenant_collection = build_tenant_collection(platform="windows")
-
-    output: list[dict] = []
-    for req in req_list[:30]:
-        query = f"{req.get('source_text', '')} {req.get('control_intent', '')}".strip()
-        try:
-            sem_results = tenant_collection.query(
-                query_texts=[query],
-                n_results=25,
-                include=["metadatas", "distances"],
-            )
-        except Exception:
-            continue
-
-        candidates = []
-        for meta, dist in zip(sem_results["metadatas"][0], sem_results["distances"][0]):
-            cid = meta.get("id", "")
-            score = round(1 - dist, 4)
-            if score < 0.40:
-                continue
-            tenant_hits_cid = tenant_index.get(cid, [])
-            candidates.append({
-                "id": cid,
-                "name": meta.get("name", cid),
-                "description": meta.get("description", ""),
-                "similarity_score": score,
-                "configured_value_label": tenant_hits_cid[0].get("configured_value_label") if tenant_hits_cid else None,
-                "configured_value": tenant_hits_cid[0].get("configured_value") if tenant_hits_cid else None,
-                "policy_name": meta.get("policy_name", ""),
-            })
-
-        if not candidates:
-            continue
-
-        score_by_id = {c["id"]: c["similarity_score"] for c in candidates}
-
-        requirement_summary = {
-            "requirement_id": req.get("requirement_id"),
-            "source_text": req.get("source_text"),
-            "security_domain": req.get("security_domain"),
-            "control_intent": req.get("control_intent"),
-            "expected_value": req.get("expected_value"),
-            "expected_unit": req.get("expected_unit"),
-        }
-        user_prompt = (
-            f"REQUIREMENT:\n{json.dumps(requirement_summary, indent=2)}\n\n"
-            f"TENANT SETTINGS:\n{json.dumps(candidates, indent=2)}\n\n"
-            "Classify each tenant setting's relationship to fulfilling this requirement."
-        )
-
-        response = model.invoke([
-            {"role": "system", "content": REQUIREMENT_CLASSIFY_SYSTEM},
-            {"role": "user", "content": user_prompt},
-        ])
-        content = response.content
-        if isinstance(content, list):
-            content = "".join(
-                b.get("text", "") if isinstance(b, dict) else str(b) for b in content
-            )
-        raw = (content or "").strip()
-        if raw.startswith("```"):
-            raw = raw.replace("```json", "").replace("```", "").strip()
-
-        try:
-            classified = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-
-        tenant_matches = []
-        for rel in classified:
-            cid = rel.get("candidate_id", "")
-            tenant_matches.append({
-                "setting_id": cid,
-                "setting_name": rel.get("candidate_name", ""),
-                "configured_value_label": rel.get("configured_value_label", ""),
-                "policy_name": rel.get("policy_name", ""),
-                "similarity_score": score_by_id.get(cid, 0.0),
-                "relationship": rel.get("relationship", ""),
-                "severity": rel.get("severity", "informational"),
-                "explanation": rel.get("explanation", ""),
-            })
-
-        output.append({
-            "requirement_id": req.get("requirement_id"),
-            "source_text": req.get("source_text"),
-            "security_domain": req.get("security_domain"),
-            "control_intent": req.get("control_intent"),
-            "tenant_matches": tenant_matches,
-        })
-
-    conflicts = [
-        (entry["requirement_id"], m)
-        for entry in output
-        for m in entry["tenant_matches"]
-        if m["severity"] == "finding"
-    ]
-    if conflicts:
-        print(f"\n--- Requirement Conflicts ({len(conflicts)}) ---")
-        for req_id, m in conflicts:
-            print(f"  [CONFLICTS] {req_id} ↔ {m['setting_name']}: {m['explanation']}")
-
-    return json.dumps(output, indent=2, default=list)
 policy_agent = {
     "name": "policy_agent",
     "description": (

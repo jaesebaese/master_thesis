@@ -1,10 +1,18 @@
+import logging
+
+from deepagents import create_deep_agent
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
 from typing import List
 import json
 import os
+from cis_benchmark_agent import _file_data
+from rich_renderer import RichRenderer
 from policy_agent import PolicyAgentResults, SETTINGS_JSON
 from preprocessing_at_startup import build_tenant_collection, flatten_for_relevance
+from prompts import REQUIREMENT_CLASSIFY_SYSTEM, COMPLIANCE_CLASSIFY_SYSTEM
+from activity_stream import astream_activity
+import asyncio
 
 OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
 
@@ -257,7 +265,7 @@ def analyze_configs() -> str:
 
 
 @tool
-def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
+def find_configs_in_tenant(runtime: ToolRuntime) -> str:
     """Semantically match each security requirement from policy_requirements.json
     against the tenant's configured settings via a single batched vector search.
 
@@ -327,12 +335,17 @@ def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
                 "setting_name": meta.get("name", cid),
                 "configured_value_label": meta.get("configured_value_label", ""),
                 "configured_value": tenant_hits[0].get("configured_value") if tenant_hits else None,
+                "description": meta.get("description", ""),
                 "policy_name": meta.get("policy_name", ""),
                 "similarity_score": score,
             })
         output.append({
             "requirement_id": req.get("requirement_id"),
             "source_text": req.get("source_text"),
+            "expected_value": req.get("expected_value"),
+            "expected_unit": req.get("expected_unit"),
+            "operator": req.get("operator"),
+            "strength": req.get("strength"),
             "security_domain": req.get("security_domain"),
             "control_intent": req.get("control_intent"),
             "tenant_matches": matches,
@@ -340,12 +353,163 @@ def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
 
     return json.dumps(output, indent=2)
 
+""" @tool
+def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
+    For each security requirement from policy_requirements.json, classify the relationship of each semantically 
+    matched tenant setting (from find_configs_in_tenant) to the requirement using one of these labels: satisfies, 
+    conflicts, partial, prerequisite, unrelated. Return a JSON array of requirements, each with its tenant matches 
+    and their classifications and explanations.
+    
+    files = runtime.state.get("files", {})
+    file_entry = files.get("/requirements_analysis_tenant.json") or files.get("requirements_analysis_tenant.json")
+    if file_entry is None:
+        return json.dumps({"error": "requirements_analysis_tenant.json not found. Ensure policy_agent has run first."})
+
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        requirements_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
+    else:
+        requirements_str = str(file_entry)
+
+    try:
+        parsed = json.loads(requirements_str)
+    except json.JSONDecodeError:
+        import ast
+        parsed = ast.literal_eval(requirements_str)
+    req_list: list[dict] = parsed.get("requirements", parsed) if isinstance(parsed, dict) else parsed
+
+        requirement_summary = {
+            "requirement_id": req.get("requirement_id"),
+            "source_text": req.get("source_text"),
+            "security_domain": req.get("security_domain"),
+            "control_intent": req.get("control_intent"),
+            "expected_value": req.get("expected_value"),
+            "expected_unit": req.get("expected_unit"),
+        }
+        user_prompt = (
+            f"REQUIREMENT:\n{json.dumps(requirement_summary, indent=2)}\n\n"
+            f"TENANT SETTINGS:\n{json.dumps(candidates, indent=2)}\n\n"
+            "Classify each tenant setting's relationship to fulfilling this requirement."
+        )
+
+        response = model.invoke([
+            {"role": "system", "content": REQUIREMENT_CLASSIFY_SYSTEM},
+            {"role": "user", "content": user_prompt},
+        ])
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+            )
+        raw = (content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.replace("```json", "").replace("```", "").strip()
+
+        try:
+            classified = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+
+        tenant_matches = []
+        for rel in classified:
+            cid = rel.get("candidate_id", "")
+            tenant_matches.append({
+                "setting_id": cid,
+                "setting_name": rel.get("candidate_name", ""),
+                "configured_value_label": rel.get("configured_value_label", ""),
+                "policy_name": rel.get("policy_name", ""),
+                "similarity_score": score_by_id.get(cid, 0.0),
+                "relationship": rel.get("relationship", ""),
+                "severity": rel.get("severity", "informational"),
+                "explanation": rel.get("explanation", ""),
+            })
+
+        output.append({
+            "requirement_id": req.get("requirement_id"),
+            "source_text": req.get("source_text"),
+            "security_domain": req.get("security_domain"),
+            "control_intent": req.get("control_intent"),
+            "tenant_matches": tenant_matches,
+        })
+        print(f"Processed requirement {req.get('requirement_id')}, found {len(tenant_matches)} matches. and ouput: {json.dumps(output[-1], indent=2)}")
+
+    conflicts = [
+        (entry["requirement_id"], m)
+        for entry in output
+        for m in entry["tenant_matches"]
+        if m["severity"] == "finding"
+    ]
+    if conflicts:
+        print(f"\n--- Requirement Conflicts ({len(conflicts)}) ---")
+        for req_id, m in conflicts:
+            print(f"  [CONFLICTS] {req_id} ↔ {m['setting_name']}: {m['explanation']}")
+
+    return json.dumps(output, indent=2, default=list) """
+
+
+@tool
+def evaluate_requirements_compliance(runtime: ToolRuntime) -> str:
+    """Read requirements_analysis_tenant.json (output of find_configs_in_tenant) and make a
+    single LLM call to classify each requirement as satisfied, violated, or not_configured
+    based on the tenant's Intune settings.
+    """
+    files = runtime.state.get("files", {})
+    file_entry = (
+        files.get("/requirements_analysis_tenant.json")
+        or files.get("requirements_analysis_tenant.json")
+    )
+
+    if file_entry is None:
+        disk_path = os.path.join(os.path.dirname(__file__), "requirements_analysis_tenant.json")
+        try:
+            with open(disk_path) as f:
+                requirements_list = json.load(f)
+        except FileNotFoundError:
+            return json.dumps({"error": "requirements_analysis_tenant.json not found. Run find_configs_in_tenant first."})
+    else:
+        if isinstance(file_entry, dict):
+            raw = file_entry.get("content", [])
+            requirements_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
+        else:
+            requirements_str = str(file_entry)
+        requirements_list = json.loads(requirements_str)
+
+    user_prompt = (
+        "Classify each requirement's compliance status based on the tenant settings.\n\n"
+        f"REQUIREMENTS AND MATCHED TENANT SETTINGS:\n{json.dumps(requirements_list, indent=2)}"
+    )
+
+    response = model.invoke([
+        {"role": "system", "content": COMPLIANCE_CLASSIFY_SYSTEM},
+        {"role": "user", "content": user_prompt},
+    ])
+
+    content = response.content
+    if isinstance(content, list):
+        content = "".join(
+            b.get("text", "") if isinstance(b, dict) else str(b) for b in content
+        )
+    raw = (content or "").strip()
+    if raw.startswith("```"):
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
+    result = json.loads(raw)
+
+    findings = [r for r in result if r.get("severity") == "finding"]
+    if findings:
+        print(f"\n--- Violations ({len(findings)}) ---")
+        for r in findings:
+            print(f"  [VIOLATED] {r['requirement_id']}: {r['explanation']}")
+
+    print(f"\nCompliance summary: {len(result)} requirements evaluated, {len(findings)} violated.")
+    return json.dumps(result, indent=2)
+
 
 config_agent = {
     "name": "config_agent",
     "description": (
         "Retrieves and analyzes Intune configuration policies. "
-        "Use analyze_requirements_against_tenant to semantically match security requirements "
+        "Use find_configs_in_tenant to semantically match security requirements "
         "against the tenant's configured settings via vector search."
     ),
     "system_prompt": (
@@ -355,7 +519,7 @@ config_agent = {
 
         "## Requirements compliance\n"
         "To check how well the tenant satisfies the security policy requirements, "
-        "call analyze_requirements_against_tenant (no arguments). "
+        "call find_configs_in_tenant (no arguments). "
         "It reads policy_requirements.json from the virtual filesystem and returns a list — "
         "one entry per requirement — each with a 'tenant_matches' array of the most similar "
         "tenant settings. Each match has: setting_id, setting_name, configured_value_label, "
@@ -363,11 +527,34 @@ config_agent = {
         "IMPORTANT: After the tool returns, write the full JSON result to a new file with the name: 'requirements_analysis_tenant.json'.\n"
         "For each requirement, report which settings matched and their configured values.\n\n"
 
-    ),
-    "tools": [analyze_requirements_against_tenant],
+        "## Requirements compliance classification\n"
+        "After find_configs_in_tenant has run and its output has been saved, call evaluate_requirements_compliance "
+        "(no arguments) to classify each requirement as satisfied, violated, or not_configured in a single LLM call.\n\n"
+        "IMPORTANT: After the tool returns, write the full JSON result to a new file with the name: 'requirements_compliance_analysis.json'.\n"
+        "For each requirement, report which settings matched and their configured values.\n\n"
+
+        "## Return a summary of all \n"
+        ),
+    "tools": [find_configs_in_tenant, evaluate_requirements_compliance],
     "model": model,
 }
 
+co_agent = create_deep_agent(system_prompt=config_agent["system_prompt"], tools=config_agent["tools"], model=config_agent["model"])
+
 if __name__ == "__main__":
-    result = analyze_requirements_against_tenant.invoke({"messages": [{"role": "user"}]})
-    print(result)
+    logger = logging.getLogger(__name__)
+    renderer = RichRenderer(logger=logger)
+
+    #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
+    pending = {
+        "messages": [{"role": "user", "content": "Check interdependecies in the security configurations"}],
+        "files": {
+            "policy_requirements.json": _file_data(os.path.join(os.path.dirname(__file__), "policy_requirements.json"))
+        },
+    }
+    run_config = {"configurable": {"thread_id": "1"}}
+
+    final_state = asyncio.run(
+        astream_activity(co_agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+    )
+    print("\nFINAL STATE:\n" + json.dumps(final_state, indent=2))
