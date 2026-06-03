@@ -353,99 +353,6 @@ def find_configs_in_tenant(runtime: ToolRuntime) -> str:
 
     return json.dumps(output, indent=2)
 
-""" @tool
-def analyze_requirements_against_tenant(runtime: ToolRuntime) -> str:
-    For each security requirement from policy_requirements.json, classify the relationship of each semantically 
-    matched tenant setting (from find_configs_in_tenant) to the requirement using one of these labels: satisfies, 
-    conflicts, partial, prerequisite, unrelated. Return a JSON array of requirements, each with its tenant matches 
-    and their classifications and explanations.
-    
-    files = runtime.state.get("files", {})
-    file_entry = files.get("/requirements_analysis_tenant.json") or files.get("requirements_analysis_tenant.json")
-    if file_entry is None:
-        return json.dumps({"error": "requirements_analysis_tenant.json not found. Ensure policy_agent has run first."})
-
-    if isinstance(file_entry, dict):
-        raw = file_entry.get("content", [])
-        requirements_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
-    else:
-        requirements_str = str(file_entry)
-
-    try:
-        parsed = json.loads(requirements_str)
-    except json.JSONDecodeError:
-        import ast
-        parsed = ast.literal_eval(requirements_str)
-    req_list: list[dict] = parsed.get("requirements", parsed) if isinstance(parsed, dict) else parsed
-
-        requirement_summary = {
-            "requirement_id": req.get("requirement_id"),
-            "source_text": req.get("source_text"),
-            "security_domain": req.get("security_domain"),
-            "control_intent": req.get("control_intent"),
-            "expected_value": req.get("expected_value"),
-            "expected_unit": req.get("expected_unit"),
-        }
-        user_prompt = (
-            f"REQUIREMENT:\n{json.dumps(requirement_summary, indent=2)}\n\n"
-            f"TENANT SETTINGS:\n{json.dumps(candidates, indent=2)}\n\n"
-            "Classify each tenant setting's relationship to fulfilling this requirement."
-        )
-
-        response = model.invoke([
-            {"role": "system", "content": REQUIREMENT_CLASSIFY_SYSTEM},
-            {"role": "user", "content": user_prompt},
-        ])
-        content = response.content
-        if isinstance(content, list):
-            content = "".join(
-                b.get("text", "") if isinstance(b, dict) else str(b) for b in content
-            )
-        raw = (content or "").strip()
-        if raw.startswith("```"):
-            raw = raw.replace("```json", "").replace("```", "").strip()
-
-        try:
-            classified = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-
-        tenant_matches = []
-        for rel in classified:
-            cid = rel.get("candidate_id", "")
-            tenant_matches.append({
-                "setting_id": cid,
-                "setting_name": rel.get("candidate_name", ""),
-                "configured_value_label": rel.get("configured_value_label", ""),
-                "policy_name": rel.get("policy_name", ""),
-                "similarity_score": score_by_id.get(cid, 0.0),
-                "relationship": rel.get("relationship", ""),
-                "severity": rel.get("severity", "informational"),
-                "explanation": rel.get("explanation", ""),
-            })
-
-        output.append({
-            "requirement_id": req.get("requirement_id"),
-            "source_text": req.get("source_text"),
-            "security_domain": req.get("security_domain"),
-            "control_intent": req.get("control_intent"),
-            "tenant_matches": tenant_matches,
-        })
-        print(f"Processed requirement {req.get('requirement_id')}, found {len(tenant_matches)} matches. and ouput: {json.dumps(output[-1], indent=2)}")
-
-    conflicts = [
-        (entry["requirement_id"], m)
-        for entry in output
-        for m in entry["tenant_matches"]
-        if m["severity"] == "finding"
-    ]
-    if conflicts:
-        print(f"\n--- Requirement Conflicts ({len(conflicts)}) ---")
-        for req_id, m in conflicts:
-            print(f"  [CONFLICTS] {req_id} ↔ {m['setting_name']}: {m['explanation']}")
-
-    return json.dumps(output, indent=2, default=list) """
-
 
 @tool
 def evaluate_requirements_compliance(runtime: ToolRuntime) -> str:
@@ -495,13 +402,6 @@ def evaluate_requirements_compliance(runtime: ToolRuntime) -> str:
 
     result = json.loads(raw)
 
-    findings = [r for r in result if r.get("severity") == "finding"]
-    if findings:
-        print(f"\n--- Violations ({len(findings)}) ---")
-        for r in findings:
-            print(f"  [VIOLATED] {r['requirement_id']}: {r['explanation']}")
-
-    print(f"\nCompliance summary: {len(result)} requirements evaluated, {len(findings)} violated.")
     return json.dumps(result, indent=2)
 
 
@@ -533,7 +433,7 @@ config_agent = {
         "IMPORTANT: After the tool returns, write the full JSON result to a new file with the name: 'requirements_compliance_analysis.json'.\n"
         "For each requirement, report which settings matched and their configured values.\n\n"
 
-        "## Return a summary of all \n"
+        "## Return a summary table \n"
         ),
     "tools": [find_configs_in_tenant, evaluate_requirements_compliance],
     "model": model,

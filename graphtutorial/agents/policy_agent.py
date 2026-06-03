@@ -31,17 +31,6 @@ model = init_chat_model(model=OPENAI_API_MODEL, model_provider="openai", tempera
     temperature=0.0,
 )
  """
-class PolicySetting(BaseModel):
-    id: str
-    name: str
-    description: str
-    platform: str
-    #similarity_score: float
-
-class PolicyAgentResults(BaseModel):
-    settings: list[PolicySetting] = Field(
-        description="All relevant Intune settings with similarity_score above 0.5"
-    )
 
 def build_intune_vector_db(force_rebuild: bool = False):
     """Embed all settings from intune_configuration_settings.json into a
@@ -344,77 +333,27 @@ Rules:
 - The output must be parseable by json.loads().
 """
 
-
 @tool
-def find_relevant_configured_settings(runtime: ToolRuntime, policy_input: str | None = None) -> str:
-    """Identify which currently-configured Intune settings are relevant to
-    a security policy or topic.
-
-    When policy_input is omitted, reads the policy from security_policy.txt
-    in the virtual filesystem (or from disk as a fallback). When policy_input
-    is provided, uses it directly.
-
-    Returns:
-        A JSON string with a `settings` array containing the relevant
-        configured settings, with all fields preserved verbatim.
+def check_security_policy(runtime: ToolRuntime) -> str:
     """
-    if not policy_input:
-        files = runtime.state.get("files", {})
-        file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
-        if file_entry is not None:
-            if isinstance(file_entry, dict):
-                raw = file_entry.get("content", [])
-                policy_input = "\n".join(raw) if isinstance(raw, list) else str(raw)
-            else:
-                policy_input = str(file_entry)
-        else:
-            disk_path = os.path.join(os.path.dirname(__file__), "security_policy.txt")
-            try:
-                with open(disk_path) as f:
-                    policy_input = f.read()
-            except FileNotFoundError:
-                return json.dumps({
-                    "settings": [],
-                    "error": "security_policy.txt not found in virtual filesystem or on disk.",
-                })
+    Check if the given security policy fulfils the format requirements.
 
-    with open(TENANT_CONFIG_PATH) as f:
-        configured_settings = json.load(f)
+    This tool receives the security policy text.
 
-    with open(SETTINGS_JSON) as f:
-        catalog = {s["id"]: s for s in json.load(f)}
+    The tool returns a JSON object containing only the settings from the input array that are relevant to the policy.
+    No new settings should be invented, and unrelated settings should be excluded. All fields from the input must be preserved verbatim.
+    """
+    files = runtime.state.get("files", {})
+        
+    file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
 
-    flattened_settings = flatten_for_relevance(configured_settings, catalog)
-
-    user_prompt = (
-        f"SECURITY POLICY:\n{policy_input}\n\n"
-        f"TENANT'S CONFIGURED SETTINGS:\n{json.dumps(flattened_settings, indent=2)}\n\n"
-        f"Return the relevant settings as JSON."
-    )
-
-    response = model.invoke([
-        {"role": "system", "content": RELEVANCE_SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ])
-
-    content = response.content
-    if isinstance(content, list):
-        content = "".join(
-            b.get("text", "") if isinstance(b, dict) else str(b) for b in content
-        )
-    raw = (content or "").strip()
-
-    # Validate JSON before returning, fall through gracefully
-    try:
-        parsed = json.loads(raw)
-        return json.dumps(parsed, indent=2)
-    except json.JSONDecodeError:
-        return json.dumps({
-            "settings": [],
-            "error": "Model returned invalid JSON",
-            "raw_output": raw,
-        }, indent=2)
-
+    if file_entry is None:
+        return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
+    if isinstance(file_entry, dict):
+        raw = file_entry.get("content", [])
+        policy_file = "\n\n".join(raw) if isinstance(raw, list) else str(raw)
+    else:
+        policy_file = str(file_entry)
 
 policy_agent = {
     "name": "policy_agent",
@@ -492,30 +431,6 @@ Failure to comply with this policy may result in disciplinary measures, which ca
     #requirements_json = policy_requirement_extractor.invoke({"policy_input": policy})
     #print(requirements_json)
 
-    """requirements = json.loads(requirements_json)["requirements"]
-
-    print("\n--- Matching Intune settings per requirement ---\n")
-
-    for requirement in requirements:
-        query = " ".join([
-            str(requirement.get("security_domain") or ""),
-            str(requirement.get("source_text") or ""),
-            str(requirement.get("control_intent") or ""),
-            str(requirement.get("expected_value") or ""),
-            str(requirement.get("expected_unit") or ""),
-        ])
-
-        print(f"\n### {requirement['requirement_id']} — {requirement['control_intent']} ###")
-        print(f"Query: {query}\n")
-
-        matches = policy_analyzer.invoke({"query": query})
-        print(matches) 
-
-    
-    print("\n--- Matching Intune settings per requirement ---\n")
-    matches = policy_analyzer.invoke({"query": policy})
-    print(matches)
-"""
     result = policy_requirement_extractor.invoke({
     "security_policy": policy, "platform": "windows10"})
     print(result)

@@ -1,0 +1,529 @@
+[
+  {
+    "requirement_id": "REQ-001",
+    "source_text": "Passwords must be created to ensure they are difficult to guess or compromise.",
+    "security_domain": "authentication",
+    "control_intent": "use_passwords_difficult_to_guess",
+    "cis_matches": [
+      {
+        "cis_id": "26.3",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Complex Characters' is set to 'Digits and lowercase letters are required'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters",
+        "configured_value": "2",
+        "raw_value": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters_2",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.6233
+      },
+      {
+        "cis_id": "26.8",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Length' is set to '14 or more character(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordlength",
+        "configured_value": "14",
+        "raw_value": "14",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5966
+      },
+      {
+        "cis_id": "26.9",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Minimum Password Age' is set to '1 or more day(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "configured_value": "1",
+        "raw_value": "1",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5663
+      },
+      {
+        "cis_id": "26.2",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Alphanumeric Device Password Required' is set to 'Password or Alphanumeric PIN required'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired",
+        "configured_value": "0",
+        "raw_value": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired_0",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5411
+      },
+      {
+        "cis_id": "4.11.8.1",
+        "cis_section": "4.11.8",
+        "cis_title": "(L1) Ensure 'Do not display the password reveal button' is set to 'Enabled'",
+        "setting_definition_id": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal",
+        "configured_value": "1",
+        "raw_value": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal_1",
+        "policy_name": "CIS (L1) Admin Templates - Windows Components (4.11) - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5304
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-002",
+    "source_text": "All passwords must be unique to each system and must not be reused across different services.",
+    "security_domain": "authentication",
+    "control_intent": "prevent_password_reuse_across_services",
+    "cis_matches": [
+      {
+        "cis_id": "89.16",
+        "cis_section": "89",
+        "cis_title": "(L1) Ensure 'Deny Log On As Service Job' to include 'Guests'",
+        "setting_definition_id": "device_vendor_msft_policy_config_userrights_denylogonasservice",
+        "configured_value": "['*S-1-5-32-546']",
+        "raw_value": "['*S-1-5-32-546']",
+        "policy_name": "CIS (L1) User Rights (89) - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5304
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-003",
+    "source_text": "Passwords must remain confidential and must not be shared with any other individual, including IT personnel.",
+    "security_domain": "access_control",
+    "control_intent": "keep_passwords_confidential_not_shared",
+    "cis_matches": [
+      {
+        "cis_id": "4.11.36.3.2",
+        "cis_section": "4.11.36.3",
+        "cis_title": "(L1) Ensure 'Do not allow passwords to be saved' is set to 'Enabled'",
+        "setting_definition_id": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving",
+        "configured_value": "1",
+        "raw_value": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving_1",
+        "policy_name": "CIS (L1) Admin Templates - Windows Components (4.11) - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5156
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-004",
+    "source_text": "Passwords must not be stored in plain text (digitally or physically) unless protected by approved secure storage mechanisms such as password managers.",
+    "security_domain": "data_protection",
+    "control_intent": "prevent_plain_text_password_storage",
+    "cis_matches": [
+      {
+        "cis_id": "4.11.8.1",
+        "cis_section": "4.11.8",
+        "cis_title": "(L1) Ensure 'Do not display the password reveal button' is set to 'Enabled'",
+        "setting_definition_id": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal",
+        "configured_value": "1",
+        "raw_value": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal_1",
+        "policy_name": "CIS (L1) Admin Templates - Windows Components (4.11) - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5247
+      },
+      {
+        "cis_id": "76.1.3",
+        "cis_section": "76.1",
+        "cis_title": "(L1) Ensure 'Notify Unsafe App' is set to 'Enabled'",
+        "setting_definition_id": "device_vendor_msft_policy_config_webthreatdefense_notifyunsafeapp",
+        "configured_value": "1",
+        "raw_value": "device_vendor_msft_policy_config_webthreatdefense_notifyunsafeapp_1",
+        "policy_name": "CIS (L1) Section 15 - 104 - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5088
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-005",
+    "source_text": "Passwords must have a minimum length of twelve characters.",
+    "security_domain": "authentication",
+    "control_intent": "enforce_min_password_length",
+    "cis_matches": [
+      {
+        "cis_id": "26.3",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Complex Characters' is set to 'Digits and lowercase letters are required'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters",
+        "configured_value": "2",
+        "raw_value": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters_2",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5834
+      },
+      {
+        "cis_id": "26.8",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Length' is set to '14 or more character(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordlength",
+        "configured_value": "14",
+        "raw_value": "14",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5196
+      },
+      {
+        "cis_id": "26.9",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Minimum Password Age' is set to '1 or more day(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "configured_value": "1",
+        "raw_value": "1",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5186
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-006",
+    "source_text": "Passwords must include a combination of uppercase letters, lowercase letters, numbers, and special characters.",
+    "security_domain": "authentication",
+    "control_intent": "enforce_password_character_complexity",
+    "cis_matches": [
+      {
+        "cis_id": "26.3",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Complex Characters' is set to 'Digits and lowercase letters are required'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters",
+        "configured_value": "2",
+        "raw_value": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters_2",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.6395
+      },
+      {
+        "cis_id": "26.8",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Length' is set to '14 or more character(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordlength",
+        "configured_value": "14",
+        "raw_value": "14",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5477
+      },
+      {
+        "cis_id": "26.2",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Alphanumeric Device Password Required' is set to 'Password or Alphanumeric PIN required'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired",
+        "configured_value": "0",
+        "raw_value": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired_0",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5209
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-007",
+    "source_text": "Where systems allow, passphrases should be at least sixteen characters and composed of multiple unrelated words combined with numbers or special characters.",
+    "security_domain": "authentication",
+    "control_intent": "encourage_min_passphrase_length",
+    "cis_matches": [
+      {
+        "cis_id": "26.8",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Length' is set to '14 or more character(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordlength",
+        "configured_value": "14",
+        "raw_value": "14",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5898
+      },
+      {
+        "cis_id": "26.3",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Complex Characters' is set to 'Digits and lowercase letters are required'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters",
+        "configured_value": "2",
+        "raw_value": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters_2",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5008
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-008",
+    "source_text": "Users must not reuse previous passwords; the organization will enforce controls to prevent reuse of at least the last ten passwords.",
+    "security_domain": "authentication",
+    "control_intent": "enforce_password_history_prevent_reuse",
+    "cis_matches": [
+      {
+        "cis_id": "26.9",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Minimum Password Age' is set to '1 or more day(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "configured_value": "1",
+        "raw_value": "1",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.6687
+      },
+      {
+        "cis_id": "26.5",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password History' is set to '24 or more password(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordhistory",
+        "configured_value": "24",
+        "raw_value": "24",
+        "policy_name": "CIS (L1) Autopilot - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.6203
+      },
+      {
+        "cis_id": "26.4",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password Expiration' is set to '365 or fewer days, but not 0'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+        "configured_value": "365",
+        "raw_value": "365",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5805
+      },
+      {
+        "cis_id": "4.11.36.3.2",
+        "cis_section": "4.11.36.3",
+        "cis_title": "(L1) Ensure 'Do not allow passwords to be saved' is set to 'Enabled'",
+        "setting_definition_id": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving",
+        "configured_value": "1",
+        "raw_value": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving_1",
+        "policy_name": "CIS (L1) Admin Templates - Windows Components (4.11) - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5441
+      },
+      {
+        "cis_id": "76.1.2",
+        "cis_section": "76.1",
+        "cis_title": "(L1) Ensure 'Notify Password Reuse' is set to 'Enabled'",
+        "setting_definition_id": "device_vendor_msft_policy_config_webthreatdefense_notifypasswordreuse",
+        "configured_value": "1",
+        "raw_value": "device_vendor_msft_policy_config_webthreatdefense_notifypasswordreuse_1",
+        "policy_name": "CIS (L1) Section 15 - 104 - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5384
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-009",
+    "source_text": "Standard user accounts must update their passwords at least every ninety days.",
+    "security_domain": "authentication",
+    "control_intent": "enforce_standard_password_expiry",
+    "cis_matches": [
+      {
+        "cis_id": "26.9",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Minimum Password Age' is set to '1 or more day(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "configured_value": "1",
+        "raw_value": "1",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.6951
+      },
+      {
+        "cis_id": "26.4",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password Expiration' is set to '365 or fewer days, but not 0'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+        "configured_value": "365",
+        "raw_value": "365",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.665
+      },
+      {
+        "cis_id": "26.5",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password History' is set to '24 or more password(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordhistory",
+        "configured_value": "24",
+        "raw_value": "24",
+        "policy_name": "CIS (L1) Autopilot - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5172
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-010",
+    "source_text": "Privileged accounts must be updated every sixty days.",
+    "security_domain": "authentication",
+    "control_intent": "enforce_privileged_password_expiry",
+    "cis_matches": [
+      {
+        "cis_id": "26.9",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Minimum Password Age' is set to '1 or more day(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "configured_value": "1",
+        "raw_value": "1",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5936
+      },
+      {
+        "cis_id": "26.4",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password Expiration' is set to '365 or fewer days, but not 0'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+        "configured_value": "365",
+        "raw_value": "365",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5905
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-011",
+    "source_text": "Passwords must be changed immediately if there is any suspicion that they have been compromised.",
+    "security_domain": "authentication",
+    "control_intent": "require_immediate_password_change_on_compromise_suspicion",
+    "cis_matches": [
+      {
+        "cis_id": "26.9",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Minimum Password Age' is set to '1 or more day(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "configured_value": "1",
+        "raw_value": "1",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5701
+      },
+      {
+        "cis_id": "26.4",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password Expiration' is set to '365 or fewer days, but not 0'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+        "configured_value": "365",
+        "raw_value": "365",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5156
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-012",
+    "source_text": "Multi-factor authentication is required for access to sensitive systems, remote access services, and all privileged accounts.",
+    "security_domain": "authentication",
+    "control_intent": "require_mfa_for_sensitive_and_privileged_access",
+    "cis_matches": []
+  },
+  {
+    "requirement_id": "REQ-013",
+    "source_text": "Accounts will be automatically locked after five failed login attempts.",
+    "security_domain": "access_control",
+    "control_intent": "enforce_account_lockout_after_failed_logins",
+    "cis_matches": [
+      {
+        "cis_id": "6.2",
+        "cis_section": "6",
+        "cis_title": "(L1) Ensure 'Account Logon Logoff Audit Account Lockout' is set to include 'Failure'",
+        "setting_definition_id": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout",
+        "configured_value": "2",
+        "raw_value": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout_2",
+        "policy_name": "CIS (L1) Auditing (6) - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.6673
+      },
+      {
+        "cis_id": "26.6",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Max Device Password Failed Attempts' is set to '5 or fewer failed attempt(s), but not 0'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_maxdevicepasswordfailedattempts",
+        "configured_value": "5",
+        "raw_value": "5",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.592
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-014",
+    "source_text": "After lockout, the account will be locked for a minimum of fifteen minutes.",
+    "security_domain": "access_control",
+    "control_intent": "enforce_min_lockout_duration",
+    "cis_matches": [
+      {
+        "cis_id": "26.6",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Max Device Password Failed Attempts' is set to '5 or fewer failed attempt(s), but not 0'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_maxdevicepasswordfailedattempts",
+        "configured_value": "5",
+        "raw_value": "5",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5383
+      },
+      {
+        "cis_id": "26.7",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Max Inactivity Time Device Lock' is set to '15 or fewer minutes, but not 0'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_maxinactivitytimedevicelock",
+        "configured_value": "15",
+        "raw_value": "15",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5155
+      },
+      {
+        "cis_id": "6.2",
+        "cis_section": "6",
+        "cis_title": "(L1) Ensure 'Account Logon Logoff Audit Account Lockout' is set to include 'Failure'",
+        "setting_definition_id": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout",
+        "configured_value": "2",
+        "raw_value": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout_2",
+        "policy_name": "CIS (L1) Auditing (6) - Windows 11 Intune 4.0.0",
+        "similarity_score": 0.5093
+      },
+      {
+        "cis_id": "26.4",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password Expiration' is set to '365 or fewer days, but not 0'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+        "configured_value": "365",
+        "raw_value": "365",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5031
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-015",
+    "source_text": "User sessions must be automatically terminated after fifteen minutes of inactivity.",
+    "security_domain": "access_control",
+    "control_intent": "terminate_sessions_after_inactivity",
+    "cis_matches": []
+  },
+  {
+    "requirement_id": "REQ-016",
+    "source_text": "Passwords must not be stored in plain text; they must be protected using strong cryptographic hashing algorithms such as bcrypt or Argon2.",
+    "security_domain": "data_protection",
+    "control_intent": "hash_passwords_instead_of_plain_text",
+    "cis_matches": []
+  },
+  {
+    "requirement_id": "REQ-017",
+    "source_text": "Passwords must only be transmitted over secure channels that provide encryption.",
+    "security_domain": "data_protection",
+    "control_intent": "encrypt_password_transmission_in_transit",
+    "cis_matches": []
+  },
+  {
+    "requirement_id": "REQ-018",
+    "source_text": "Privileged accounts must use stronger passwords with a minimum length of sixteen characters.",
+    "security_domain": "authentication",
+    "control_intent": "enforce_min_privileged_password_length",
+    "cis_matches": [
+      {
+        "cis_id": "26.3",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Complex Characters' is set to 'Digits and lowercase letters are required'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters",
+        "configured_value": "2",
+        "raw_value": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters_2",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5779
+      },
+      {
+        "cis_id": "26.8",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Length' is set to '14 or more character(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordlength",
+        "configured_value": "14",
+        "raw_value": "14",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5272
+      },
+      {
+        "cis_id": "26.9",
+        "cis_section": "26",
+        "cis_title": "(L1) Ensure 'Minimum Password Age' is set to '1 or more day(s)'",
+        "setting_definition_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "configured_value": "1",
+        "raw_value": "1",
+        "policy_name": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 ",
+        "similarity_score": 0.5142
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-019",
+    "source_text": "Shared use of privileged accounts is not permitted.",
+    "security_domain": "access_control",
+    "control_intent": "prevent_shared_privileged_accounts",
+    "cis_matches": []
+  }
+]

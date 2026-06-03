@@ -175,7 +175,7 @@ def _file_data(path: str) -> dict:
         lines = f.read().splitlines()
     return {"content": lines, "created_at": now, "modified_at": now}
 
-if __name__ == "__main__":
+"""if __name__ == "__main__":
     # result = tavily_search.invoke("Bitlocker policies for Windows devices")
     logger = logging.getLogger(__name__)
     renderer = RichRenderer(logger=logger)
@@ -192,4 +192,4 @@ if __name__ == "__main__":
     final_state = asyncio.run(
         astream_activity(s_agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
     )
-    print("\nFINAL STATE:\n" + str(final_state))
+    print("\nFINAL STATE:\n" + str(final_state))"""

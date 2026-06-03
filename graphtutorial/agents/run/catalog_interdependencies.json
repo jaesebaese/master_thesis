@@ -1,0 +1,356 @@
+{
+  "summary": {
+    "settings_analyzed": 22,
+    "structural_conflicts": 0,
+    "unmet_catalog_prerequisites": 0,
+    "informational_relationships": 0
+  },
+  "settings_catalog_status": [
+    {
+      "setting_id": "device_vendor_msft_laps_policies_passwordlength",
+      "name": "Password Length ",
+      "description": "Use this setting to configure the length of the password of the managed local administrator account.\n\nIf not specified, ",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "10"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_laps_policies_passwordcomplexity",
+      "name": "Password Complexity ",
+      "description": "Use this setting to configure password complexity of the managed local administrator account.\n\nThe allowable settings ar",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Large letters + small letters + numbers + special characters"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_laps_policies_passwordagedays_aad",
+      "name": "Password Age Days",
+      "description": "Use this policy to configure the maximum password age of the managed local administrator account.\n\nIf not specified, thi",
+      "in_catalog": true,
+      "depends_on": [
+        "device_vendor_msft_laps_policies_backupdirectory"
+      ],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "30"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_ts_sessions_idlelimittext",
+      "name": "Idle session limit: (Device)",
+      "description": "",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "15 minutes"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2",
+      "name": "Set time limit for disconnected sessions",
+      "description": "This policy setting allows you to configure a time limit for disconnected Remote Desktop Services sessions.\r\n\r\nYou can u",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Enabled"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2",
+      "name": "Set time limit for active but idle Remote Desktop Services sessions",
+      "description": "This policy setting allows you to specify the maximum amount of time that an active Remote Desktop Services session can ",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Enabled"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2_ts_sessions_enddisconnected",
+      "name": "End a disconnected session (Device)",
+      "description": "",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "1 minute"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters",
+      "name": "Min Device Password Complex Characters",
+      "description": "The number of complex element types (uppercase and lowercase letters, numbers, and punctuation) required for a strong PI",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Digits and lowercase letters are required"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordlength",
+      "name": "Min Device Password Length",
+      "description": "Specifies the minimum number or characters required in the PIN or password.",
+      "in_catalog": true,
+      "depends_on": [
+        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
+      ],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "14"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+      "name": "Minimum Password Age",
+      "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "1"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired",
+      "name": "Alphanumeric Device Password Required",
+      "description": "Determines the type of PIN or password required. This policy only applies if the DeviceLock/DevicePasswordEnabled policy",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Password or Alphanumeric PIN required."
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal",
+      "name": "Do not display the password reveal button",
+      "description": "This policy setting allows you to configure the display of the password reveal button in password entry user experiences",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Enabled"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_userrights_denylogonasservice",
+      "name": "Deny Log On As Service",
+      "description": "Deny log on as a service -This security setting determines which service accounts are prevented from registering a proce",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - User Rights [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "['*S-1-5-32-546']"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving",
+      "name": "Do not allow passwords to be saved",
+      "description": "Controls whether passwords can be saved on this computer from Remote Desktop Connection.\r\n\r\nIf you enable this setting t",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Enabled"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_webthreatdefense_notifyunsafeapp",
+      "name": "Notify Unsafe App",
+      "description": "Configures Enhanced Phishing Protection notifications for protecting passwords typed into M365 Office applications, Note",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Enhanced Phishing Protection [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Enabled"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordhistory",
+      "name": "Device Password History",
+      "description": "Specifies how many passwords can be stored in the history that can’t be used.",
+      "in_catalog": true,
+      "depends_on": [
+        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
+      ],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "24"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+      "name": "Device Password Expiration",
+      "description": "Specifies when the password expires (in days). 0 - Passwords do not expire.",
+      "in_catalog": true,
+      "depends_on": [
+        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
+      ],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "365"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_webthreatdefense_notifypasswordreuse",
+      "name": "Notify Password Reuse",
+      "description": "Configures Enhanced Phishing Protection notifications for protecting passwords from reuse.",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Enhanced Phishing Protection [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Enabled"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout",
+      "name": "Account Logon Logoff Audit Account Lockout",
+      "description": "This policy setting allows you to audit events generated by a failed attempt to log on to an account that is locked out.",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Auditing [L1] - Windows 11 - v4.0.0",
+          "configured_value_label": "Failure"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_maxdevicepasswordfailedattempts",
+      "name": "Max Device Password Failed Attempts",
+      "description": "On a desktop, when the user reaches the value set by this policy, it is not wiped. Instead, the desktop is put on BitLoc",
+      "in_catalog": true,
+      "depends_on": [
+        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
+      ],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "5"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_maxinactivitytimedevicelock",
+      "name": "Max Inactivity Time Device Lock",
+      "description": "Specifies the maximum amount of time (in minutes) allowed after the device is idle that will cause the device to become ",
+      "in_catalog": true,
+      "depends_on": [
+        "device_vendor_msft_policy_config_devicelock_devicepasswordenabled"
+      ],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "15"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_localpoliciessecurityoptions_interactivelogon_machineinactivitylimit_v2",
+      "name": "Interactive Logon Machine Inactivity Limit",
+      "description": "Interactive logon: Machine inactivity limit.  Windows notices inactivity of a logon session, and if the amount of inacti",
+      "in_catalog": true,
+      "depends_on": [],
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Local Policies Security Options [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "900"
+        }
+      ]
+    }
+  ],
+  "parent_catalog_status": [
+    {
+      "setting_id": "device_vendor_msft_laps_policies_backupdirectory",
+      "name": "Backup Directory ",
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Backup the password to Microsoft Entra ID only"
+        }
+      ]
+    },
+    {
+      "setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordenabled",
+      "name": "Device Password Enabled",
+      "tenant_status": "configured",
+      "tenant_occurrences": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "configured_value_label": "Enabled"
+        }
+      ]
+    }
+  ],
+  "findings": [],
+  "informational": []
+}

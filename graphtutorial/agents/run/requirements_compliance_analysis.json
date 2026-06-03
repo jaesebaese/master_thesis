@@ -1,0 +1,614 @@
+[
+  {
+    "requirement_id": "REQ-001",
+    "source_text": "Passwords must be created to ensure they are difficult to guess or compromise.",
+    "expected_value": null,
+    "expected_unit": null,
+    "operator": null,
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "use_passwords_difficult_to_guess",
+    "tenant_matches": [],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "No matched tenant settings were provided that directly enforce password strength/difficulty-to-guess controls for this requirement.",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-002",
+    "source_text": "All passwords must be unique to each system and must not be reused across different services.",
+    "expected_value": null,
+    "expected_unit": null,
+    "operator": null,
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "prevent_password_reuse_across_services",
+    "tenant_matches": [],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "No matched tenant settings were provided that implement cross-service/system password reuse prevention.",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-003",
+    "source_text": "Passwords must remain confidential and must not be shared with any other individual, including IT personnel.",
+    "expected_value": null,
+    "expected_unit": null,
+    "operator": null,
+    "strength": "mandatory",
+    "security_domain": "access_control",
+    "control_intent": "keep_passwords_confidential_not_shared",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it. You can set a value between 1 and 998 days, or you can allow changes immediate",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5054
+      }
+    ],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "The only matched setting (Minimum Password Age) controls how often passwords can be changed; it does not enforce confidentiality or prevent password sharing with other individuals.",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-004",
+    "source_text": "Passwords must not be stored in plain text (digitally or physically) unless protected by approved secure storage mechanisms such as password managers.",
+    "expected_value": false,
+    "expected_unit": "enabled_disabled",
+    "operator": "exactly",
+    "strength": "mandatory",
+    "security_domain": "data_protection",
+    "control_intent": "prevent_plain_text_password_storage",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving",
+        "setting_name": "Do not allow passwords to be saved",
+        "configured_value_label": "Enabled",
+        "configured_value": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving_1",
+        "description": "Controls whether passwords can be saved on this computer from Remote Desktop Connection.\r\n\r\nIf you enable this setting the password saving checkbox in Remote Desktop Connection will be disabled and us",
+        "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.501
+      }
+    ],
+    "status": "satisfied",
+    "severity": "informational",
+    "explanation": "The 'Do not allow passwords to be saved' setting is enabled, which prevents saving passwords (reducing plain-text password storage risk).",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving",
+        "setting_name": "Do not allow passwords to be saved",
+        "configured_value_label": "Enabled",
+        "configured_value": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving_1",
+        "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-005",
+    "source_text": "Passwords must have a minimum length of twelve characters.",
+    "expected_value": 12,
+    "expected_unit": "characters",
+    "operator": "minimum",
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "enforce_min_password_length",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordlength",
+        "setting_name": "Password Length ",
+        "configured_value_label": "10",
+        "configured_value": 10,
+        "description": "Use this setting to configure the length of the password of the managed local administrator account.\n\nIf not specified, this setting will default to 14 characters.\n\nThis setting has a minimum allowed ",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5627
+      },
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordcomplexity",
+        "setting_name": "Password Complexity ",
+        "configured_value_label": "Large letters + small letters + numbers + special characters",
+        "configured_value": "device_vendor_msft_laps_policies_passwordcomplexity_4",
+        "description": "Use this setting to configure password complexity of the managed local administrator account.\n\nThe allowable settings are:\n\n1=Large letters\n2=Large letters + small letters\n3=Large letters + small lett",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5348
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it. You can set a value between 1 and 998 days, or you can allow changes immediate",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5186
+      }
+    ],
+    "status": "violated",
+    "severity": "finding",
+    "explanation": "The relevant 'Password Length' setting for managed local administrator accounts is configured to 10 characters, which is below the required minimum of 12.",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordlength",
+        "setting_name": "Password Length ",
+        "configured_value_label": "10",
+        "configured_value": 10,
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-006",
+    "source_text": "Passwords must include a combination of uppercase letters, lowercase letters, numbers, and special characters.",
+    "expected_value": null,
+    "expected_unit": null,
+    "operator": null,
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "enforce_password_character_complexity",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordcomplexity",
+        "setting_name": "Password Complexity ",
+        "configured_value_label": "Large letters + small letters + numbers + special characters",
+        "configured_value": "device_vendor_msft_laps_policies_passwordcomplexity_4",
+        "description": "Use this setting to configure password complexity of the managed local administrator account.\n\nThe allowable settings are:\n\n1=Large letters\n2=Large letters + small letters\n3=Large letters + small lett",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5886
+      }
+    ],
+    "status": "satisfied",
+    "severity": "informational",
+    "explanation": "The 'Password Complexity' setting is configured to include uppercase, lowercase, numbers, and special characters.",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordcomplexity",
+        "setting_name": "Password Complexity ",
+        "configured_value_label": "Large letters + small letters + numbers + special characters",
+        "configured_value": "device_vendor_msft_laps_policies_passwordcomplexity_4",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-007",
+    "source_text": "Where systems allow, passphrases should be at least sixteen characters and composed of multiple unrelated words combined with numbers or special characters.",
+    "expected_value": 16,
+    "expected_unit": "characters",
+    "operator": "minimum",
+    "strength": "recommended",
+    "security_domain": "authentication",
+    "control_intent": "encourage_min_passphrase_length",
+    "tenant_matches": [],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "No matched tenant settings were provided that configure minimum passphrase length or word-based passphrase composition rules.",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-008",
+    "source_text": "Users must not reuse previous passwords; the organization will enforce controls to prevent reuse of at least the last ten passwords.",
+    "expected_value": 10,
+    "expected_unit": "other",
+    "operator": "minimum",
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "enforce_password_history_prevent_reuse",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it. You can set a value between 1 and 998 days, or you can allow changes immediate",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.6347
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_webthreatdefense_notifypasswordreuse",
+        "setting_name": "Notify Password Reuse",
+        "configured_value_label": "Enabled",
+        "configured_value": "device_vendor_msft_policy_config_webthreatdefense_notifypasswordreuse_1",
+        "description": "Configures Enhanced Phishing Protection notifications for protecting passwords from reuse.",
+        "policy_name": "CIS - Enhanced Phishing Protection [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5387
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordhistory",
+        "setting_name": "Device Password History",
+        "configured_value_label": "24",
+        "configured_value": 24,
+        "description": "Specifies how many passwords can be stored in the history that can\u2019t be used.",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5245
+      },
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordagedays_aad",
+        "setting_name": "Password Age Days",
+        "configured_value_label": "30",
+        "configured_value": 30,
+        "description": "Use this policy to configure the maximum password age of the managed local administrator account.\n\nIf not specified, this setting will default to 30 days\n\nThis setting has a minimum allowed value of 1",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5192
+      }
+    ],
+    "status": "satisfied",
+    "severity": "informational",
+    "explanation": "The 'Device Password History' setting is configured to 24, which is greater than or equal to the requirement to prevent reuse of at least the last 10 passwords.",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordhistory",
+        "setting_name": "Device Password History",
+        "configured_value_label": "24",
+        "configured_value": 24,
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-009",
+    "source_text": "Standard user accounts must update their passwords at least every ninety days.",
+    "expected_value": 90,
+    "expected_unit": "days",
+    "operator": "maximum",
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "enforce_standard_password_expiry",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it. You can set a value between 1 and 998 days, or you can allow changes immediate",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.6528
+      },
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordagedays_aad",
+        "setting_name": "Password Age Days",
+        "configured_value_label": "30",
+        "configured_value": 30,
+        "description": "Use this policy to configure the maximum password age of the managed local administrator account.\n\nIf not specified, this setting will default to 30 days\n\nThis setting has a minimum allowed value of 1",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5825
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+        "setting_name": "Device Password Expiration",
+        "configured_value_label": "365",
+        "configured_value": 365,
+        "description": "Specifies when the password expires (in days). 0 - Passwords do not expire.",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5139
+      }
+    ],
+    "status": "violated",
+    "severity": "finding",
+    "explanation": "The relevant password expiration control is configured to 365 days, which exceeds the maximum allowed value of 90 days for standard user password updates.",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+        "setting_name": "Device Password Expiration",
+        "configured_value_label": "365",
+        "configured_value": 365,
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-010",
+    "source_text": "Privileged accounts must be updated every sixty days.",
+    "expected_value": 60,
+    "expected_unit": "days",
+    "operator": "maximum",
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "enforce_privileged_password_expiry",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordagedays_aad",
+        "setting_name": "Password Age Days",
+        "configured_value_label": "30",
+        "configured_value": 30,
+        "description": "Use this policy to configure the maximum password age of the managed local administrator account.\n\nIf not specified, this setting will default to 30 days\n\nThis setting has a minimum allowed value of 1",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5732
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it. You can set a value between 1 and 998 days, or you can allow changes immediate",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5628
+      }
+    ],
+    "status": "satisfied",
+    "severity": "informational",
+    "explanation": "For privileged/managed local administrator accounts, 'Password Age Days' is configured to 30 days, which is less than or equal to the required maximum of 60 days.",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordagedays_aad",
+        "setting_name": "Password Age Days",
+        "configured_value_label": "30",
+        "configured_value": 30,
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-011",
+    "source_text": "Passwords must be changed immediately if there is any suspicion that they have been compromised.",
+    "expected_value": null,
+    "expected_unit": null,
+    "operator": null,
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "require_immediate_password_change_on_compromise_suspicion",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it. You can set a value between 1 and 998 days, or you can allow changes immediate",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.501
+      }
+    ],
+    "status": "violated",
+    "severity": "finding",
+    "explanation": "The matched 'Minimum Password Age' setting requires a password to be used for at least 1 day before it can be changed, which prevents immediate password change upon suspected compromise.",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-012",
+    "source_text": "Multi-factor authentication is required for access to sensitive systems, remote access services, and all privileged accounts.",
+    "expected_value": true,
+    "expected_unit": "enabled_disabled",
+    "operator": "exactly",
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "require_mfa_for_sensitive_and_privileged_access",
+    "tenant_matches": [],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "No matched tenant settings were provided that configure or enforce MFA requirements for sensitive systems, remote access, or privileged accounts.",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-013",
+    "source_text": "Accounts will be automatically locked after five failed login attempts.",
+    "expected_value": 5,
+    "expected_unit": "attempts",
+    "operator": "exactly",
+    "strength": "mandatory",
+    "security_domain": "access_control",
+    "control_intent": "enforce_account_lockout_after_failed_logins",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout",
+        "setting_name": "Account Logon Logoff Audit Account Lockout",
+        "configured_value_label": "Failure",
+        "configured_value": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout_2",
+        "description": "This policy setting allows you to audit events generated by a failed attempt to log on to an account that is locked out.  If you configure this policy setting, an audit event is generated when an acco",
+        "policy_name": "CIS - Auditing [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5703
+      }
+    ],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "The matched setting is an auditing configuration for lockout events and does not specify lockout threshold (failed attempts) needed to enforce locking after five failures.",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-014",
+    "source_text": "After lockout, the account will be locked for a minimum of fifteen minutes.",
+    "expected_value": 15,
+    "expected_unit": "minutes",
+    "operator": "minimum",
+    "strength": "mandatory",
+    "security_domain": "access_control",
+    "control_intent": "enforce_min_lockout_duration",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_maxinactivitytimedevicelock",
+        "setting_name": "Max Inactivity Time Device Lock",
+        "configured_value_label": "15",
+        "configured_value": 15,
+        "description": "Specifies the maximum amount of time (in minutes) allowed after the device is idle that will cause the device to become PIN or password locked. Users can select any existing timeout value less than th",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5389
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it. You can set a value between 1 and 998 days, or you can allow changes immediate",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.527
+      }
+    ],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "The matched 'Max Inactivity Time Device Lock' controls device idle lock behavior, not account lockout duration after failed logins. No relevant account lockout duration setting was matched.",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-015",
+    "source_text": "User sessions must be automatically terminated after fifteen minutes of inactivity.",
+    "expected_value": 15,
+    "expected_unit": "minutes",
+    "operator": "exactly",
+    "strength": "mandatory",
+    "security_domain": "access_control",
+    "control_intent": "terminate_sessions_after_inactivity",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_ts_sessions_idlelimittext",
+        "setting_name": "Idle session limit: (Device)",
+        "configured_value_label": "15 minutes",
+        "configured_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_ts_sessions_idlelimittext_900000",
+        "description": "",
+        "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5661
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2",
+        "setting_name": "Set time limit for disconnected sessions",
+        "configured_value_label": "Enabled",
+        "configured_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2_1",
+        "description": "This policy setting allows you to configure a time limit for disconnected Remote Desktop Services sessions.\r\n\r\nYou can use this policy setting to specify the maximum amount of time that a disconnected",
+        "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.565
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_localpoliciessecurityoptions_interactivelogon_machineinactivitylimit_v2",
+        "setting_name": "Interactive Logon Machine Inactivity Limit",
+        "configured_value_label": "900",
+        "configured_value": 900,
+        "description": "Interactive logon: Machine inactivity limit.  Windows notices inactivity of a logon session, and if the amount of inactive time exceeds the inactivity limit, then the screen saver will run, locking th",
+        "policy_name": "CIS - Local Policies Security Options [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5495
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2",
+        "setting_name": "Set time limit for active but idle Remote Desktop Services sessions",
+        "configured_value_label": "Enabled",
+        "configured_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_1",
+        "description": "This policy setting allows you to specify the maximum amount of time that an active Remote Desktop Services session can be idle (without user input) before it is automatically disconnected.\r\n\r\nIf you ",
+        "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5484
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2_ts_sessions_enddisconnected",
+        "setting_name": "End a disconnected session (Device)",
+        "configured_value_label": "1 minute",
+        "configured_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2_ts_sessions_enddisconnected_60000",
+        "description": "",
+        "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5143
+      }
+    ],
+    "status": "satisfied",
+    "severity": "informational",
+    "explanation": "The 'Idle session limit: (Device)' setting is configured to 15 minutes, matching the requirement to terminate sessions after exactly fifteen minutes of inactivity.",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_ts_sessions_idlelimittext",
+        "setting_name": "Idle session limit: (Device)",
+        "configured_value_label": "15 minutes",
+        "configured_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_ts_sessions_idlelimittext_900000",
+        "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-016",
+    "source_text": "Passwords must not be stored in plain text; they must be protected using strong cryptographic hashing algorithms such as bcrypt or Argon2.",
+    "expected_value": null,
+    "expected_unit": null,
+    "operator": null,
+    "strength": "mandatory",
+    "security_domain": "data_protection",
+    "control_intent": "hash_passwords_instead_of_plain_text",
+    "tenant_matches": [],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "No matched tenant settings were provided that configure hashing algorithms for password storage (e.g., bcrypt/Argon2).",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-017",
+    "source_text": "Passwords must only be transmitted over secure channels that provide encryption.",
+    "expected_value": true,
+    "expected_unit": "enabled_disabled",
+    "operator": "exactly",
+    "strength": "mandatory",
+    "security_domain": "data_protection",
+    "control_intent": "encrypt_password_transmission_in_transit",
+    "tenant_matches": [],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "No matched tenant settings were provided that enforce encrypted transmission of passwords in transit.",
+    "contributing_settings": []
+  },
+  {
+    "requirement_id": "REQ-018",
+    "source_text": "Privileged accounts must use stronger passwords with a minimum length of sixteen characters.",
+    "expected_value": 16,
+    "expected_unit": "characters",
+    "operator": "minimum",
+    "strength": "mandatory",
+    "security_domain": "authentication",
+    "control_intent": "enforce_min_privileged_password_length",
+    "tenant_matches": [
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordlength",
+        "setting_name": "Password Length ",
+        "configured_value_label": "10",
+        "configured_value": 10,
+        "description": "Use this setting to configure the length of the password of the managed local administrator account.\n\nIf not specified, this setting will default to 14 characters.\n\nThis setting has a minimum allowed ",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.6225
+      },
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordcomplexity",
+        "setting_name": "Password Complexity ",
+        "configured_value_label": "Large letters + small letters + numbers + special characters",
+        "configured_value": "device_vendor_msft_laps_policies_passwordcomplexity_4",
+        "description": "Use this setting to configure password complexity of the managed local administrator account.\n\nThe allowable settings are:\n\n1=Large letters\n2=Large letters + small letters\n3=Large letters + small lett",
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5946
+      },
+      {
+        "setting_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+        "setting_name": "Minimum Password Age",
+        "configured_value_label": "1",
+        "configured_value": 1,
+        "description": "This security setting determines the period of time (in days) that a password must be used before the user can change it. You can set a value between 1 and 998 days, or you can allow changes immediate",
+        "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+        "similarity_score": 0.5212
+      }
+    ],
+    "status": "violated",
+    "severity": "finding",
+    "explanation": "The privileged/managed local administrator 'Password Length' is configured to 10 characters, which is below the required minimum of 16.",
+    "contributing_settings": [
+      {
+        "setting_id": "device_vendor_msft_laps_policies_passwordlength",
+        "setting_name": "Password Length ",
+        "configured_value_label": "10",
+        "configured_value": 10,
+        "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0"
+      }
+    ]
+  },
+  {
+    "requirement_id": "REQ-019",
+    "source_text": "Shared use of privileged accounts is not permitted.",
+    "expected_value": false,
+    "expected_unit": "enabled_disabled",
+    "operator": "exactly",
+    "strength": "mandatory",
+    "security_domain": "access_control",
+    "control_intent": "prevent_shared_privileged_accounts",
+    "tenant_matches": [],
+    "status": "not_configured",
+    "severity": "informational",
+    "explanation": "No matched tenant settings were provided that prevent or detect shared privileged account usage.",
+    "contributing_settings": []
+  }
+]

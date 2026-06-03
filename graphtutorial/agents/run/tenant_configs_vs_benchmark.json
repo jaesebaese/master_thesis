@@ -1,0 +1,630 @@
+{
+  "summary": {
+    "total": 22,
+    "compliant": 15,
+    "non_compliant": 0,
+    "not_configured": 0,
+    "no_benchmark_reference": 7,
+    "found_via_benchmark_search_only": 7,
+    "found_via_tenant_search_only": 8,
+    "found_via_both": 7
+  },
+  "results": [
+    {
+      "setting_definition_id": "device_vendor_msft_laps_policies_passwordlength",
+      "matched_by_requirements": [
+        "REQ-005",
+        "REQ-018"
+      ],
+      "found_via": [
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "no_benchmark_reference",
+      "compliance_status": "no_benchmark_reference",
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "626d89cc-0567-4858-ad02-8c93ce71005d",
+          "raw_value": 10,
+          "value_type": "integer"
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_laps_policies_passwordcomplexity",
+      "matched_by_requirements": [
+        "REQ-005",
+        "REQ-006",
+        "REQ-018"
+      ],
+      "found_via": [
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "no_benchmark_reference",
+      "compliance_status": "no_benchmark_reference",
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "626d89cc-0567-4858-ad02-8c93ce71005d",
+          "raw_value": "device_vendor_msft_laps_policies_passwordcomplexity_4",
+          "value_type": "choice"
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_laps_policies_passwordagedays_aad",
+      "matched_by_requirements": [
+        "REQ-008",
+        "REQ-009",
+        "REQ-010"
+      ],
+      "found_via": [
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "no_benchmark_reference",
+      "compliance_status": "no_benchmark_reference",
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "626d89cc-0567-4858-ad02-8c93ce71005d",
+          "raw_value": 30,
+          "value_type": "integer"
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_ts_sessions_idlelimittext",
+      "matched_by_requirements": [
+        "REQ-015"
+      ],
+      "found_via": [
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "no_benchmark_reference",
+      "compliance_status": "no_benchmark_reference",
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+          "policy_id": "592702c6-f151-47be-900f-c47ef62fc6e8",
+          "raw_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_ts_sessions_idlelimittext_900000",
+          "value_type": "choice"
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2",
+      "matched_by_requirements": [
+        "REQ-015"
+      ],
+      "found_via": [
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "no_benchmark_reference",
+      "compliance_status": "no_benchmark_reference",
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+          "policy_id": "592702c6-f151-47be-900f-c47ef62fc6e8",
+          "raw_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2_1",
+          "value_type": "choice"
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2",
+      "matched_by_requirements": [
+        "REQ-015"
+      ],
+      "found_via": [
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "no_benchmark_reference",
+      "compliance_status": "no_benchmark_reference",
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+          "policy_id": "592702c6-f151-47be-900f-c47ef62fc6e8",
+          "raw_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_idle_limit_2_1",
+          "value_type": "choice"
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2_ts_sessions_enddisconnected",
+      "matched_by_requirements": [
+        "REQ-015"
+      ],
+      "found_via": [
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "no_benchmark_reference",
+      "compliance_status": "no_benchmark_reference",
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L2] - Windows 11 - v4.0.0.0",
+          "policy_id": "592702c6-f151-47be-900f-c47ef62fc6e8",
+          "raw_value": "device_vendor_msft_policy_config_admx_terminalserver_ts_sessions_disconnected_timeout_2_ts_sessions_enddisconnected_60000",
+          "value_type": "choice"
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters",
+      "matched_by_requirements": [
+        "REQ-001",
+        "REQ-005",
+        "REQ-006",
+        "REQ-007",
+        "REQ-018"
+      ],
+      "found_via": [
+        "benchmark_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "26.3",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Complex Characters' is set to 'Digits and lowercase letters are required'",
+        "cis_reference_value": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters_2",
+        "cis_reference_value_display": "2",
+        "operator": ">=",
+        "benchmark_policy": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 "
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
+          "raw_value": "device_vendor_msft_policy_config_devicelock_mindevicepasswordcomplexcharacters_2",
+          "value_type": "choice",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_devicelock_mindevicepasswordlength",
+      "matched_by_requirements": [
+        "REQ-001",
+        "REQ-005",
+        "REQ-006",
+        "REQ-007",
+        "REQ-018"
+      ],
+      "found_via": [
+        "benchmark_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "26.8",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Min Device Password Length' is set to '14 or more character(s)'",
+        "cis_reference_value": "14",
+        "cis_reference_value_display": "14",
+        "operator": ">=",
+        "benchmark_policy": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 "
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
+          "raw_value": 14,
+          "value_type": "integer",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_devicelock_minimumpasswordage",
+      "matched_by_requirements": [
+        "REQ-001",
+        "REQ-005",
+        "REQ-008",
+        "REQ-009",
+        "REQ-010",
+        "REQ-011",
+        "REQ-018",
+        "REQ-003",
+        "REQ-014"
+      ],
+      "found_via": [
+        "benchmark_search",
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "26.9",
+        "cis_title": "(L1) Ensure 'Minimum Password Age' is set to '1 or more day(s)'",
+        "cis_reference_value": "1",
+        "cis_reference_value_display": "1",
+        "operator": ">=",
+        "benchmark_policy": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 "
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
+          "raw_value": 1,
+          "value_type": "integer",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired",
+      "matched_by_requirements": [
+        "REQ-001",
+        "REQ-006"
+      ],
+      "found_via": [
+        "benchmark_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "26.2",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Alphanumeric Device Password Required' is set to 'Password or Alphanumeric PIN required'",
+        "cis_reference_value": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired_0",
+        "cis_reference_value_display": "0",
+        "operator": "==",
+        "benchmark_policy": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 "
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
+          "raw_value": "device_vendor_msft_policy_config_devicelock_alphanumericdevicepasswordrequired_0",
+          "value_type": "choice",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal",
+      "matched_by_requirements": [
+        "REQ-001",
+        "REQ-004"
+      ],
+      "found_via": [
+        "benchmark_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "4.11.8.1",
+        "cis_title": "(L1) Ensure 'Do not display the password reveal button' is set to 'Enabled'",
+        "cis_reference_value": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal_1",
+        "cis_reference_value_display": "1",
+        "operator": "==",
+        "benchmark_policy": "CIS (L1) Admin Templates - Windows Components (4.11) - Windows 11 Intune 4.0.0"
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "c4dc50cf-85bf-49ad-a4d7-c594a7096e98",
+          "raw_value": "device_vendor_msft_policy_config_credentialsui_disablepasswordreveal_1",
+          "value_type": "choice",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_userrights_denylogonasservice",
+      "matched_by_requirements": [
+        "REQ-002"
+      ],
+      "found_via": [
+        "benchmark_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "89.16",
+        "cis_title": "(L1) Ensure 'Deny Log On As Service Job' to include 'Guests'",
+        "cis_reference_value": "['*S-1-5-32-546']",
+        "cis_reference_value_display": "['*S-1-5-32-546']",
+        "operator": "==",
+        "benchmark_policy": "CIS (L1) User Rights (89) - Windows 11 Intune 4.0.0"
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - User Rights [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "6dfdf040-89a5-4c22-b052-37409486c1e3",
+          "raw_value": [
+            "*S-1-5-32-546"
+          ],
+          "value_type": "simpleCollection",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving",
+      "matched_by_requirements": [
+        "REQ-003",
+        "REQ-008",
+        "REQ-004"
+      ],
+      "found_via": [
+        "benchmark_search",
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "4.11.36.3.2",
+        "cis_title": "(L1) Ensure 'Do not allow passwords to be saved' is set to 'Enabled'",
+        "cis_reference_value": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving_1",
+        "cis_reference_value_display": "1",
+        "operator": "==",
+        "benchmark_policy": "CIS (L1) Admin Templates - Windows Components (4.11) - Windows 11 Intune 4.0.0"
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Windows Components - Restrictions [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "c4dc50cf-85bf-49ad-a4d7-c594a7096e98",
+          "raw_value": "device_vendor_msft_policy_config_remotedesktopservices_donotallowpasswordsaving_1",
+          "value_type": "choice",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_webthreatdefense_notifyunsafeapp",
+      "matched_by_requirements": [
+        "REQ-004"
+      ],
+      "found_via": [
+        "benchmark_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "76.1.3",
+        "cis_title": "(L1) Ensure 'Notify Unsafe App' is set to 'Enabled'",
+        "cis_reference_value": "device_vendor_msft_policy_config_webthreatdefense_notifyunsafeapp_1",
+        "cis_reference_value_display": "1",
+        "operator": "==",
+        "benchmark_policy": "CIS (L1) Section 15 - 104 - Windows 11 Intune 4.0.0"
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Enhanced Phishing Protection [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "a90b4ff2-a29d-4e5d-b138-4e2a19c0309d",
+          "raw_value": "device_vendor_msft_policy_config_webthreatdefense_notifyunsafeapp_1",
+          "value_type": "choice",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordhistory",
+      "matched_by_requirements": [
+        "REQ-008",
+        "REQ-009"
+      ],
+      "found_via": [
+        "benchmark_search",
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "26.5",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password History' is set to '24 or more password(s)'",
+        "cis_reference_value": "24",
+        "cis_reference_value_display": "24",
+        "operator": ">=",
+        "benchmark_policy": "CIS (L1) Autopilot - Windows 11 Intune 4.0.0"
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
+          "raw_value": 24,
+          "value_type": "integer",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_devicelock_devicepasswordexpiration",
+      "matched_by_requirements": [
+        "REQ-008",
+        "REQ-009",
+        "REQ-010",
+        "REQ-011",
+        "REQ-014"
+      ],
+      "found_via": [
+        "benchmark_search",
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "26.4",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Device Password Expiration' is set to '365 or fewer days, but not 0'",
+        "cis_reference_value": "365",
+        "cis_reference_value_display": "365",
+        "operator": "<=",
+        "benchmark_policy": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 "
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
+          "raw_value": 365,
+          "value_type": "integer",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_webthreatdefense_notifypasswordreuse",
+      "matched_by_requirements": [
+        "REQ-008"
+      ],
+      "found_via": [
+        "benchmark_search",
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "76.1.2",
+        "cis_title": "(L1) Ensure 'Notify Password Reuse' is set to 'Enabled'",
+        "cis_reference_value": "device_vendor_msft_policy_config_webthreatdefense_notifypasswordreuse_1",
+        "cis_reference_value_display": "1",
+        "operator": "==",
+        "benchmark_policy": "CIS (L1) Section 15 - 104 - Windows 11 Intune 4.0.0"
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Enhanced Phishing Protection [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "a90b4ff2-a29d-4e5d-b138-4e2a19c0309d",
+          "raw_value": "device_vendor_msft_policy_config_webthreatdefense_notifypasswordreuse_1",
+          "value_type": "choice",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout",
+      "matched_by_requirements": [
+        "REQ-013",
+        "REQ-014"
+      ],
+      "found_via": [
+        "benchmark_search",
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "6.2",
+        "cis_title": "(L1) Ensure 'Account Logon Logoff Audit Account Lockout' is set to include 'Failure'",
+        "cis_reference_value": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout_2",
+        "cis_reference_value_display": "2",
+        "operator": "==",
+        "benchmark_policy": "CIS (L1) Auditing (6) - Windows 11 Intune 4.0.0"
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Auditing [L1] - Windows 11 - v4.0.0",
+          "policy_id": "bce5b2df-6dd8-4aab-9747-12bdd24739fc",
+          "raw_value": "device_vendor_msft_policy_config_audit_accountlogonlogoff_auditaccountlockout_2",
+          "value_type": "choice",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_devicelock_maxdevicepasswordfailedattempts",
+      "matched_by_requirements": [
+        "REQ-013",
+        "REQ-014"
+      ],
+      "found_via": [
+        "benchmark_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "26.6",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Max Device Password Failed Attempts' is set to '5 or fewer failed attempt(s), but not 0'",
+        "cis_reference_value": "5",
+        "cis_reference_value_display": "5",
+        "operator": "<=",
+        "benchmark_policy": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 "
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
+          "raw_value": 5,
+          "value_type": "integer",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_devicelock_maxinactivitytimedevicelock",
+      "matched_by_requirements": [
+        "REQ-014"
+      ],
+      "found_via": [
+        "benchmark_search",
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "26.7",
+        "cis_title": "(L1) Ensure 'Device Password Enabled: Max Inactivity Time Device Lock' is set to '15 or fewer minutes, but not 0'",
+        "cis_reference_value": "15",
+        "cis_reference_value_display": "15",
+        "operator": ">=",
+        "benchmark_policy": "CIS (L1) Device Lock & WHFB - Windows 11 Intune 4.0.0 "
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Device Lock [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "76b42865-c293-47ff-b0be-6cce07766fea",
+          "raw_value": 15,
+          "value_type": "integer",
+          "compliant": true
+        }
+      ]
+    },
+    {
+      "setting_definition_id": "device_vendor_msft_policy_config_localpoliciessecurityoptions_interactivelogon_machineinactivitylimit_v2",
+      "matched_by_requirements": [
+        "REQ-015"
+      ],
+      "found_via": [
+        "tenant_search"
+      ],
+      "tenant_status": "configured",
+      "cis_status": "has_benchmark",
+      "compliance_status": "compliant",
+      "cis_benchmark": {
+        "cis_id": "49.8",
+        "cis_title": "(L1) Ensure 'Interactive logon: Machine inactivity limit' is set to '900 or fewer second(s), but not 0'",
+        "cis_reference_value": "900",
+        "cis_reference_value_display": "900",
+        "operator": "<=",
+        "benchmark_policy": "CIS (L1) Local Policies Security Options (49) - Windows 11 Intune 4.0.0 "
+      },
+      "tenant_configurations": [
+        {
+          "policy_name": "CIS - Local Policies Security Options [L1] - Windows 11 - v4.0.0.0",
+          "policy_id": "6af60625-fa62-4a37-b748-a21f24ae6d06",
+          "raw_value": 900,
+          "value_type": "integer",
+          "compliant": true
+        }
+      ]
+    }
+  ]
+}

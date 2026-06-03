@@ -223,12 +223,12 @@ Use this status when:
 
 1. Use source_text, expected_value, expected_unit, operator, and control_intent to determine the requirement's intent.
 2. When expected_unit represents a measurable quantity (for example: days, characters, attempts, versions), compare values numerically whenever possible.
-3. Use configured_value for comparison. If unavailable, use configured_value_label.
+3. Use the setting_name, configured_value, configured_value_label, and description for comparison.
 4. Only consider settings that are semantically relevant to the requirement.
 5. If multiple relevant settings exist:
    * If at least one relevant setting satisfies the requirement, return "satisfied".
    * Return violated only when relevant settings exist and none satisfy the requirement.
-6. If no relevant settings exist, return "not_configured".   
+6. If no relevant settings exist, return "not_configured". And specifcy in the explatnation why none of the existing settings were relevant. 
 
 ## Severity Rules
 
@@ -251,18 +251,27 @@ Output schema:
 [
    {
       "requirement_id": "REQ-001",
-      "source_text": "The maximum password age must be no more than 90 days.",
-      "status": "satisfied",
-      "severity": "informational",
-      "explanation": "One concise sentence explaining the decision.",
-      "expected_value": 90,
-      "expected_unit": "days",
-      "contributing_settings": [
-   {
-      "setting_id": "setting_id_1",
-      "setting_name": "Maximum Password Age",
-      "configured_value": 90,
-      "configured_value_label": "90"
-   }
+      "source_text": "Passwords of priviledged user accountsmust have a minimum length of twelve characters.",
+      "expected_value": "12",
+      "expected_unit": "characters",
+      "operator": "minimum",
+      "strength": "mandatory",
+      "security_domain": "authentication",
+      "control_intent": "enforce_password_min_length_and_charset_complexity",
+      "tenant_matches": [
+         {
+            "setting_id": "device_vendor_msft_laps_policies_passwordlength",
+            "setting_name": "Password Length ",
+            "configured_value_label": "10",
+            "configured_value": 10,
+            "description": "Use this setting to configure the length of the password of the managed local administrator account.\n\nIf not specified, this setting will default to 14 characters.\n\nThis setting has a minimum allowed ",
+            "policy_name": "CIS - Windows LAPS [L1] - Windows 11 - v4.0.0.0",
+            "similarity_score": 0.5542
+         },
+         ...
+      ],
+      "status": "violated",
+      "severity": "finding",  
+      "explanation": "The 'Password Length' setting is configured to 10, which does not meet the minimum requirement of 12 characters, but it is a relevant setting that partially addresses the requirement."    
 ]
 """

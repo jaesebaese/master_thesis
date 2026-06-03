@@ -125,6 +125,7 @@ checkpointer = MemorySaver()
 _run_dir = Path(__file__).parent / "runs" / str(int(time.time()))
 _run_dir.mkdir(parents=True, exist_ok=True)
 
+
 agent = create_deep_agent(
     model=model,
     middleware=[task_error_guard, log_before_model, log_after_model],
@@ -193,13 +194,12 @@ Run agents sequentially — never in parallel.
 
           Make sure to write these results into a file called "final_result.md"
 
-Never call multiple subagents or tools at the same time. Each step must wait for the previous one to complete.
-
+Start at the beginning and never call multiple subagents or tools at the same time. Each step must wait for the previous one to complete.
 """,
 
 )
 
-query = "What are the best practices for password configurations in Microsoft Intune for Windows 11 devices?"
+query = "How well is the tenant's security configuration aligned with the security policy? Produce a compliance report with detailed analysis and remediation steps."
 
 def _file_data(path: str) -> dict:
     """Wrap a file's content in the FileData format deepagents expects."""
