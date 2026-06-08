@@ -2,17 +2,15 @@ import asyncio
 
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
-from typing import List
 import json
 import os
 from activity_stream import astream_activity
 from rich_renderer import RichRenderer
-from policy_agent import PolicyAgentResults, _get_intune_collection, SETTINGS_JSON
+from policy_agent import _get_intune_collection, SETTINGS_JSON
 from preprocessing_at_startup import flatten_for_relevance
 from deepagents import create_deep_agent
 import logging
-import time
-from contextvars import ContextVar
+
 
 
 OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
@@ -546,8 +544,8 @@ interdependency_agent = {
     "name": "interdependency_agent",
     "description": (
         "Analyzes Intune security policy interdependencies. "
-        "Calls find_catalog_interdependencies to detect structural conflicts and unmet prerequisites "
-        "among CIS benchmark settings and their catalog parents. "
+        "Calls find_catalog_interdependencies to detect structural conflicts, unmet prerequisites, "
+        "and parent-child relationships among Intune settings and their catalog parents. "
     ),
     "system_prompt": ("""\
 You are an Intune security policy interdependency analyst embedded in a multi-agent security review workflow.
@@ -560,22 +558,43 @@ Call find_catalog_interdependencies with no arguments. It reads tenant_configs_v
 - structural_conflicts: settings configured to contradictory values across policies or groups
 - unmet_catalog_prerequisites: CIS benchmark settings whose catalog-defined parent is not present in the tenant
 
-After the tool returns, write the full JSON result to a file named "catalog_interdependencies.json".
+After the tool returns, write the full JSON result to a file named "catalog_interdependencies.json" with the write_file tool.
 
 ## Step 2 — Consolidated report
 
-Produce a structured findings report with two sections:
+Only after the file has been written, produce a structured findings report with the following sections:
 
 ### Structural Conflicts
-List every entry from the structural_conflicts block. For each, state the setting name, the conflicting policies/groups, the differing values, and the severity.
+List every entry from the structural_conflicts block. For each, state the setting name,
+the conflicting policies/groups, the differing values, and the severity.
+If the block is empty, write "No structural conflicts identified."
 
 ### Unmet Prerequisites
-List every entry from the unmet_catalog_prerequisites block. For each, state which benchmark setting depends on the missing parent and what the missing parent is.
+List every entry from the unmet_catalog_prerequisites block. For each, state which benchmark
+setting depends on the missing parent and what the missing parent is.
+If the block is empty, write "No unmet prerequisites identified."
+
+### Informational
+List any entries with severity="informational" here as a brief summary.
+If none, omit this section.
+                      
+### Parent-Child Relationships
+Using settings_catalog_status[].depends_on and parent_catalog_status[], build a
+dependency summary showing each benchmark setting and its catalog parent(s):
+
+parent_name
+  <setting_name> → depends on → <parent_name> (<parent tenant_status>)
+
+Group by parent. If a parent is not_configured, mark it NOT CONFIGURED.
+If all parents are configured, mark them CONFIGURED.
+Omit settings with no depends_on entries.
 
 ## Rules
-- Do not invent findings. Only report what the tools return.
-- If a tool returns an error, report it clearly.
-- Severity="finding" entries belong in the findings sections above. Severity="informational" entries belong in an Informational summary.
+- Do not invent findings. Only report what the tool returns.
+- If a tool returns an error, report it clearly and do not proceed to the report.
+- severity="finding" entries belong in the findings sections above.
+- severity="informational" entries belong in the Informational section.
+- Any other severity value should be treated as a finding.
 """
     ),
     "tools": [find_catalog_interdependencies],
@@ -584,11 +603,7 @@ List every entry from the unmet_catalog_prerequisites block. For each, state whi
 
 int_agent_main = create_deep_agent(
     model=model,
-    system_prompt="""You are an Intune security policy interdependency analyst.
-    Your job is to find possible interdependencies and conflicts between Intune security configurations.
-    1. Call find_catalog_interdependencies tool to find interdependencies from the different settings
-    2. Use write file to write the results from find_catalog_interdependencies.
-    """,
+    system_prompt=interdependency_agent["system_prompt"],
     tools=[find_catalog_interdependencies],
 )
 

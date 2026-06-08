@@ -190,7 +190,7 @@ For each requirement, determine the compliance status using the matched tenant s
 
 ### satisfied
 
-The tenant has one or more relevant settings that fulfill the requirement.
+The tenant has at least one relevant setting that fulfills the requirement.
 
 Rules:
 
@@ -209,6 +209,10 @@ Examples:
 * A required security feature is disabled.
 * A configured version, age, length, or threshold is weaker than required.
 
+### partially_satisfied
+
+* Relevant settings exist and contribute to the requirement, but none fully implement the predicate, OR the predicate can't be evaluated against the available settings.
+
 ### not_configured
 
 The tenant does not have any relevant settings that implement the requirement.
@@ -216,8 +220,7 @@ The tenant does not have any relevant settings that implement the requirement.
 Use this status when:
 
 * tenant_matches is empty.
-* No matched settings are semantically related to the requirement.
-* The matched settings have a different control intent and cannot be used to evaluate compliance.
+* No matched settings are semantically related to the requirement at all.
 
 ## Evaluation Rules
 
@@ -226,14 +229,15 @@ Use this status when:
 3. Use the setting_name, configured_value, configured_value_label, and description for comparison.
 4. Only consider settings that are semantically relevant to the requirement.
 5. If multiple relevant settings exist:
-   * If at least one relevant setting satisfies the requirement, return "satisfied".
-   * Return violated only when relevant settings exist and none satisfy the requirement.
-6. If no relevant settings exist, return "not_configured". And specifcy in the explatnation why none of the existing settings were relevant. 
+   * If any direct setting exists: evaluate the predicate against direct settings only. 
+   * If only indirect settings exist: return partially_satisfied with an explanation of what they cover and what they miss.
+   * If only irrelevant settings exist: return not_configured.
+6. If no relevant settings exist, return "not_configured". And specify in the explanation why none of the existing settings were relevant. 
 
 ## Severity Rules
 
 * status = "violated" → severity = "finding"
-* status = "satisfied" or "not_configured" → severity = "informational"
+* status = "satisfied" or "partially_satisfied" or "not_configured" → severity = "informational"
 
 ## Contributing Settings
 

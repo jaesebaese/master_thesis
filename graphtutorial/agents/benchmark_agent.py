@@ -538,7 +538,7 @@ def compare_relevant_settings_to_cis_benchmark(runtime: ToolRuntime, settings_to
     }, indent=2)
 
 @tool
-def search_cis_benchmark(runtime: ToolRuntime, requirements: str = "") -> str:
+def search_benchmark(runtime: ToolRuntime, requirements: str = "") -> str:
     """Search the CIS benchmark vector DB for each requirement in a list.
 
     When called with no arguments, reads requirements.json automatically from the
@@ -612,21 +612,21 @@ def search_cis_benchmark(runtime: ToolRuntime, requirements: str = "") -> str:
 
 @tool
 def compare_search_results_to_tenant( runtime: ToolRuntime ) -> str:
-    """Compare CIS settings found by search_cis_benchmark against tenant configurations.
+    """Compare CIS settings found by search_benchmark against tenant configurations.
 
-    Takes the JSON output of search_cis_benchmark, collects every unique
+    Takes the JSON output of search_benchmark, collects every unique
     setting_definition_id across all requirements, looks each one up in the
     tenant's configured policies (policies_and_settings_expand_assign.json),
     and reports whether it is compliant, non_compliant, or not_configured.
 
     Args:
-        search_results: JSON string — the direct output of search_cis_benchmark.
+        search_results: JSON string — the direct output of search_benchmark.
     """
     
     files = runtime.state.get("files", {})
     file_entry = files.get("/requirements_vs_benchmark.json") or files.get("requirements_vs_benchmark.json")
     if file_entry is None:
-        return json.dumps({"error": "requirements_vs_benchmark.json not found. Run search_cis_benchmark first."})
+        return json.dumps({"error": "requirements_vs_benchmark.json not found. Run search_benchmark first."})
     if isinstance(file_entry, dict):
         raw = file_entry.get("content", [])
         requirements = "\n".join(raw) if isinstance(raw, list) else str(raw)
@@ -766,8 +766,8 @@ def compare_search_results_to_tenant( runtime: ToolRuntime ) -> str:
 def compare_requirements_results(runtime: ToolRuntime) -> str:
     """Unified compliance check merging both requirements search outputs.
 
-    Reads requirements_vs_benchmark.json (output of search_cis_benchmark) and
-    requirements_analysis_tenant.json (output of analyze_requirements_against_tenant),
+    Reads requirements_vs_benchmark.json (output of search_benchmark) and
+    relevant_configurations.json (output of analyze_requirements_against_tenant),
     collects the union of all unique setting_definition_ids, and for each setting:
     - Looks up its CIS benchmark reference value from matched_all_level1.json
     - Looks up its configured value(s) from the tenant's policies JSON
@@ -797,12 +797,12 @@ def compare_requirements_results(runtime: ToolRuntime) -> str:
             return ast.literal_eval(s)
 
     bench_data = _load_entry("requirements_vs_benchmark.json") or []
-    tenant_req_data = _load_entry("requirements_analysis_tenant.json") or []
+    tenant_req_data = _load_entry("relevant_configurations.json") or []
 
     if not bench_data and not tenant_req_data:
         return json.dumps({
             "error": (
-                "Neither requirements_vs_benchmark.json nor requirements_analysis_tenant.json "
+                "Neither requirements_vs_benchmark.json nor relevant_configurations.json "
                 "found. Run search_cis_benchmark and/or analyze_requirements_against_tenant first."
             )
         })
@@ -955,56 +955,73 @@ def compare_requirements_results(runtime: ToolRuntime) -> str:
     return json.dumps({"summary": summary, "results": results}, indent=2)
 
 
-cis_benchmark_agent = {
-    "name": "cis_benchmark_agent",
+benchmark_agent = {
+    "name": "benchmark_agent",
     "description": (
         "Compares the tenant's configured settings against CIS benchmarks. "
-        "First analyzes the CIS recommended settings that match with the requirements."
-        "Then checks if the tenant's settings are compliant with the CIS recommended settings."
+        "Always runs two steps: (1) search_cis_benchmark to find CIS controls matching "
+        "each policy requirement, then (2) compare_requirements_results to check whether "
+        "the tenant's configured values comply with those CIS recommendations. "
     ),
     "system_prompt": (
        "You are a CIS Benchmark compliance analyst for Microsoft Intune. "
         "Your job is to map security policy requirements to CIS Benchmark controls "
         "and check whether the tenant is compliant.\n\n"
 
-        "## Steps\n"
-        "1. Call search_cis_benchmark() with NO arguments — it reads policy_requirements.json "
-        "from the virtual filesystem automatically and returns matching CIS controls "
-        "per requirement.\n"
-        "2. Use the write_file tool and write the exact result fron search_cis_benchmark() into a file"
-        "called 'requirements_vs_benchmark.json'"
-        "3. Call to compare_requirements_results() — "
+        "## Workflow\n"
+        "Complete these steps in order. Do not proceed to the next step until the current one is complete.\n\n"
+        "Step 1: Call search_cis_benchmark() with no arguments — it reads policy_requirements.json "
+        "from the virtual filesystem and returns matching CIS controls per requirement.\n"
+
+        "Step 2: Write the exact result from search_cis_benchmark() to a file called "
+        "'requirements_vs_benchmark.json' using the write_file tool.\n"
+
+        "Step 3: Only after step 2 is complete, call compare_requirements_results() — "
         "it checks each matched CIS control against the tenant's configured policies "
         "and returns a compliance verdict per setting.\n"
-        "4. Use the write_file tool and write the exact result of compare_requirements_results()"
-        " into a file called 'tenant_configs_vs_benchmark.json'"
-        "5. Present results as a compliance table with columns:\n"
-        "   Requirement ID | CIS ID | Setting | Configured Value | "
-        "   CIS Recommended | Status\n"
-        "6. Use these status labels:\n"
+
+        "Step 4: Write the exact result from compare_requirements_results() to a file called "
+        "'tenant_configs_vs_benchmark.json' using the write_file tool.\n"
+
+        "Step 5: Only after step 4 is complete, present the results as described below.\n"
+
+        "## Output structure\n"
+        "Use the data from 'tenant_configs_vs_benchmark.json' to present the compliance results. Do not use any other data source for the compliance status or configured values.\n\n"
+        "Present results in this order:\n"
+        "1. Compliance summary: total counts of COMPLIANT / NON-COMPLIANT / NOT CONFIGURED / NOT IN BENCHMARK\n"
+        "2. Full compliance table with columns:\n"
+        "   Setting ID | Configured Value | CIS Recommended Value | Status | Matched Requirements\n"
+        "   - Setting ID: setting_definition_id\n"
+        "   - Configured Value: raw_value in tenant_configurations\n"
+        "   - CIS Recommended Value: cis_reference_value from the cis_benchmark\n"
+        "   - Status: compliance_status (any from the Status labels below)\n"
+        "   - Matched Requirements: list of matched_by_requirements"
+
+        "3. Findings detail: one section per NON-COMPLIANT or NOT CONFIGURED setting (see below)\n\n"
+
+        "## Status labels\n"
         "   - COMPLIANT: tenant value satisfies the CIS recommendation\n"
         "   - NON-COMPLIANT: tenant value deviates from the CIS recommendation\n"
         "   - NOT CONFIGURED: CIS recommends this setting but it is absent from all tenant policies\n"
         "   - NOT IN BENCHMARK: There is no CIS recommendation for the setting configured in the tenant"
+        
+        "## Findings detail\n"
+        "For each NON-COMPLIANT setting:\n"
+        "- Current tenant value and CIS recommended value\n"
+        "- CIS rationale for why this value matters\n"
+        "- Remediation path\n\n"
+        "For each NOT CONFIGURED setting:\n"
+        "- Flag as a gap: the control provides no protection\n"
+        "- CIS recommended value, rationale, and remediation path\n\n"
 
-        "## For each NON-COMPLIANT setting\n"
-        "- State the current tenant value and the CIS recommended value.\n"
-        "- State the CIS rationale for why this value matters.\n"
-        "- State the remediation path from the CIS benchmark data.\n\n"
-
-        "## For each NOT CONFIGURED setting\n"
-        "- Flag this as a gap: the control provides no protection.\n"
-        "- State what CIS recommends, why it matters (rationale), and how to remediate.\n\n"
-
-        "## Important\n"
-        "Only use data from tool output. "
-        "Do not generate remediation steps from your own knowledge."
+        "## Grounding rules\n"
+        "- Configured values and compliance verdicts must come from tool output only — never from memory.\n"
     ),
-    "tools": [search_cis_benchmark, compare_requirements_results],
+        "tools": [search_benchmark, compare_requirements_results],
     "model": model,
 }
 
-benchmark_agent = create_deep_agent(
+bench_agent = create_deep_agent(
     middleware=[log_before_model, log_after_model, tool_logger],
     system_prompt=(
         "You are a CIS Benchmark compliance analyst for Microsoft Intune. "
@@ -1023,8 +1040,8 @@ benchmark_agent = create_deep_agent(
         "4. Use the write_file tool and write the exact result of compare_search_results_to_tenant()"
         " into a file called 'tenant_configs_vs_benchmark.json'"
         "5. Present results as a compliance table with columns:\n"
-        "   Requirement ID | CIS ID | Setting | Configured Value | "
-        "   CIS Recommended | Status\n"
+        "   Setting ID | Setting Name | CIS ID | Configured Value | "
+        "   CIS Recommended Value | Status | Tenant Policy Name\n"
         "6. Use these status labels:\n"
         "   - COMPLIANT: tenant value satisfies the CIS recommendation\n"
         "   - NON-COMPLIANT: tenant value deviates from the CIS recommendation\n"
@@ -1044,7 +1061,7 @@ benchmark_agent = create_deep_agent(
         "Do not generate remediation steps from your own knowledge."
     ),
     model=model,
-    tools=[search_cis_benchmark, compare_search_results_to_tenant, compare_requirements_results])
+    tools=[search_benchmark, compare_search_results_to_tenant, compare_requirements_results])
 
 def _file_data(path: str) -> dict:
     """Wrap a file's content in the FileData format deepagents expects."""
@@ -1055,7 +1072,7 @@ def _file_data(path: str) -> dict:
     return {"content": lines, "created_at": now, "modified_at": now}
 
 if __name__ == "__main__":
-    result = benchmark_agent.invoke({
+    result = bench_agent.invoke({
         "messages": [{"role": "user", "content": "Check the CIS benchmark compliance for the security requirements in policy_requirements.json."}],
         "files": {"policy_requirements.json": _file_data(os.path.join(os.path.dirname(__file__), "policy_requirements.json"))},
     })

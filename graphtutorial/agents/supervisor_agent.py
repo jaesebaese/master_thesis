@@ -4,7 +4,7 @@ from deepagents import create_deep_agent
 from search_agent import search_agent
 from config_agent import config_agent
 from policy_agent import policy_agent
-from cis_benchmark_agent import cis_benchmark_agent
+from benchmark_agent import benchmark_agent
 from interdepedency_agent import interdependency_agent
 from typing import Any
 import json
@@ -18,9 +18,10 @@ import time
 from activity_stream import astream_activity
 from rich_renderer import RichRenderer
 import asyncio
-import time
 from contextvars import ContextVar
 from langchain.agents.middleware import before_model, after_model
+from langchain_core.messages import ToolMessage
+
 
 
 
@@ -103,7 +104,20 @@ async def task_error_guard(request, handler):
     """After a task (subagent) call completes, pause for human review if the result looks like an error."""
     if request.tool_call["name"] != "task":
         return await handler(request)
-    result = await handler(request)
+    try:
+        result = await handler(request)
+    except Exception as exc:
+        subagent = request.tool_call["args"].get("subagent_type", "?")
+        human_decision = interrupt({
+            "subagent": subagent,
+            "error_preview": str(exc)[:500],
+            "message": f"'{subagent}' raised an exception. Continue pipeline?",
+        })
+        return ToolMessage(
+            content=f"Pipeline aborted after exception in '{subagent}': {exc}",
+            tool_call_id=request.tool_call["id"],
+    )
+
     content = _extract_task_content(result)
     if _task_result_is_error(content):
         subagent = request.tool_call["args"].get("subagent_type", "?")
@@ -129,7 +143,7 @@ _run_dir.mkdir(parents=True, exist_ok=True)
 agent = create_deep_agent(
     model=model,
     middleware=[task_error_guard, log_before_model, log_after_model],
-    subagents=[policy_agent, cis_benchmark_agent, config_agent, interdependency_agent, search_agent],
+    subagents=[policy_agent, benchmark_agent, config_agent, interdependency_agent, search_agent],
     checkpointer=checkpointer,
     system_prompt = """
 You are a Microsoft Intune security supervisor. You orchestrate specialised subagents
@@ -139,62 +153,87 @@ not to compute, infer, or adjudicate compliance yourself.
 Delegate tasks to subagents using the `task` tool with this format:
 {
   "description": "What the subagent should do",
-  "subagent_type": "policy_agent" | "config_agent" | "cis_benchmark_agent" | "interdependency_agent" | "search_agent"
+  "subagent_type": "policy_agent" | "config_agent" | "benchmark_agent" | "interdependency_agent" | "search_agent"
 }
 
-After each subagent returns, write the result to "[subagent_type]_result.md" using write_file.
-Run agents sequentially — never in parallel.
+After each subagent returns, write the result to "[subagent_type]_result.md" using
+write_file. Run agents sequentially — never in parallel. Each step must wait for the
+previous one to complete before proceeding.
 
-## Process
+If a subagent returns an error, stop the pipeline and ask for human review before proceeding. Use the interrupt tool for this.
+
+## Workflow
   Step 1: Delegate to policy_agent to extract all the requirements from the security policy.
   Step 2: Delegate to config_agent to find all security settings that match the requirements from the security policy.
-  Step 3: Delegate to cis_benchmark_agent to check if the configurations are compliant to the CIS Benchmark.
-  Step 4: Delegate to interdependency_agent. 
-          Check whether there would be any conflicts or other interdependencies among the settings.
+  Step 3: Delegate to benchmark_agent to check whether the configurations are compliant with the CIS Benchmark.
+  Step 4: Delegate to interdependency_agent to check for conflicts or interdependencies among the settings.
   Step 5: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
-  Step 6: Present results as a markdown file with the following contenT:
-          1. "Benchmark Compliance": Present an overview of the results in a table with EXACTLY these columns:
+  Step 6: Only after all subagents have completed, produce the final report as a markdownfile written to "final_result.md". 
+          The report must contain the following sections in order:
 
-            | Setting | Configured | Recommended | Status | Policy Name 
+---
 
-            - Setting: Name of the security setting
-            - Configured: The current value of the setting in the user's environment
-            - Recommended: The value (or text) recommended by CIS or Microsoft
-            - Status: COMPLIANT / NON-COMPLIANT / NOT CONFIGURED / NOT IN BENCHMARK based on comparison of Configured vs Recommended fron the benchmark and search results
-            - Policy Name: The policy name where the setting is set in the tenant.
+### 1. Security Requirements Compliance
 
-            For the information in this table, use the data from the subagents in the following order of precedence:
-                - For "Recommended", use CIS Benchmark recommendations from Step 3 where available. 
-                - For "Status", determine compliance based on the "Recommended" value for each setting, using the CIS Benchmark.
-          
-          2. "Remediation" section listing each NON-COMPLIANT setting with its remediation path from CIS.
+Relay the summary table from the config_agent result unchanged.
 
-          3. "Interdependencies" section noting any interdependency warnings from Step 4. It should contain a list 
-             of any settings that have interdependencies, what those interdependencies are, and any warnings about them.
+---
 
-          4. Web Search Results: A note flagging which rows used web search because they were not covered by the CIS Benchmark, 
-             and what the recommendation from Microsoft is.
+### 2. Benchmark Compliance
 
-          5. "Security Requirements Compliance" table providing an summary of all security requirements and 
-          the settings that address them. For this, use the data from requirements_compliance_analysis.json generated by the config_agent in Step 2,
-          which should contain an analysis of which requirements are met by which settings, and whether they are compliant or not. 
-          The table should have the following columns:
+A table with EXACTLY these columns:
 
-            | Requirement id | Requirement Description | Expected Value | Addressed by Settings | Set Value | Compliance Status
+| Setting | Configured | Recommended | Status | Policy Name |
 
-            - Requirement id: Id of the security requirement from the policy
-            - Requirement Description: Description of the security requirement
-            - Expected Value: The value that should be configured for compliance
-            - Addressed by Settings: List of settings that address this requirement
-            - Set Value: The current value of the setting in the user's environment
-            - Compliance Status: SATISFIED / VIOLATED / NOT COVERED based on analysis of whether the current settings meet the requirement, 
-              using the data from requirements_analysis_tenant
+- Setting: name of the security setting
+- Configured: current value in the tenant
+- Recommended: the recommended value, using this precedence:
+    - If a CIS recommendation exists (from Step 3): use that
+    - If no CIS recommendation but a Microsoft recommendation exists (from Step 5):
+      use that and mark the row with [MS Docs]
+    - If neither exists: leave blank
+- Status:
+    - If CIS recommendation exists: COMPLIANT / NON-COMPLIANT / NOT CONFIGURED
+      based on comparison of Configured vs CIS Recommended
+    - If no CIS recommendation: NOT IN BENCHMARK (regardless of search_agent result)
+- Policy Name: the policy name where the setting is configured in the tenant
 
-          6. A "Security Posture Summary" paragraph.
+---
 
-          Make sure to write these results into a file called "final_result.md"
+### 3. Remediation
 
-Start at the beginning and never call multiple subagents or tools at the same time. Each step must wait for the previous one to complete.
+List each NON-COMPLIANT and NOT CONFIGURED setting with its recommended value, rationale and the CIS Benchmark data
+returned by benchmark_agent. Do not generate remediation steps from your own knowledge. 
+
+---
+
+### 4. Interdependencies
+
+Use the structured output from interdependency_agent:
+- List all entries from structural conflicts: setting name, conflict type, severity, and reason.
+- For unmet_catalog_prerequisites entries, show the dependency chain:
+  <setting_name> → depends on → <missing_parent_name> (NOT CONFIGURED IN TENANT)
+- List informational entries (different-group-value) in a separate sub-section
+  labelled "Informational".
+- If both blocks are empty, write "No conflictinginterdependencies or conflicts identified."
+
+---
+
+### 5. Web Search Results
+
+List each setting that used Microsoft documentation from the search_agent (Step 5) because it was not covered
+by the CIS Benchmark. For each:
+- Setting ID and name
+- Description
+- Microsoft recommendation
+- Source URL
+
+---
+
+### 6. Security Posture Summary
+
+A brief paragraph summarising the overall compliance posture, key risks, and recommended
+priorities. Base this only on the data presented in sections 1–5.
 """,
 
 )

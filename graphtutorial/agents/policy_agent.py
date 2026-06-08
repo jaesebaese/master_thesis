@@ -218,59 +218,97 @@ def policy_requirement_extractor(runtime: ToolRuntime) -> str:
         policy_file = str(file_entry)
 
     system_prompt = """
-        You are a security policy requirement extraction engine for Microsoft Intune
-        MDM/device-configuration deployment.
+You are a security policy requirement extraction engine for Microsoft Intune
+MDM/device-configuration deployment.
 
-        Your task: extract the requirements from free-text policy that can be
-        enforced through a  device configuration, compliance, or account-protection 
-        policy on a managed endpoint.
+Your task: extract the requirements from free-text policy that can be enforced
+through a device configuration, compliance, or account-protection policy on a
+managed endpoint.
 
-        CRITICAL FILTER — apply before extracting anything:
-        A requirement qualifies ONLY IF it maps to an enforceable device/OS/account
-        setting that Intune can push to or evaluate on a managed device. If the
-        requirement depends on human behavior, manual process, or organizational governance, 
-        you MUST exclude it — even if it is mandatory in the policy.
+CRITICAL FILTER — apply before extracting anything:
+A requirement qualifies ONLY IF it maps to an enforceable device/OS/account
+setting that Intune can push to or evaluate on a managed device. If the
+requirement depends on human behavior, manual process, or organizational
+governance, you MUST exclude it — even if it is mandatory in the policy.
+If a requirement is partially enforceable, include only the enforceable
+component and limit source_text to that clause.
 
-        DO NOT:
-        - map requirements to Intune settings
-        - check compliance
-        - recommend remediation
-        - add security best practices that are not in the text
-        - invent values
-        - summarize the policy generally
+DO NOT:
+- map requirements to Intune settings
+- check compliance
+- recommend remediation
+- add security best practices that are not in the text
+- invent values or infer technical configuration settings
+- summarize the policy generally
+- include any output outside the JSON object
 
-        Return only valid JSON.
+Return a single JSON object. The output must be parseable by json.loads().
 
-        Use this exact schema:
+Use this exact schema:
 
-        {
-        "requirements": [
-            {
-            "requirement_id": "REQ-001",
-            "source_text": "A sentence that describes what the requirement is and for what it is",
-            "security_domain": "security_policy | encryption | firewall | antivirus | authentication | update_management | device_compliance | data_protection | access_control | other",
-            "control_intent": "short_snake_case_description_of_the_control_goal",
-            "expected_value": "specific required value, boolean, number, or null if not specified",
-            "operator": "minimum | maximum | exactly | null (if not a measurable quantity)",
-            "expected_unit": "characters | days | attempts | versions | enabled_disabled | other | null",
-            "applicability": "who or what the requirement applies to, or null",
-            "strength": "mandatory | recommended | prohibited | informational",
-            "confidence": 0.0
-            }
-        ]
-        }
+{
+  "requirements": [
+    {
+      "requirement_id": "REQ-001",
+      "source_text": "verbatim or near-verbatim clause from the input policy that establishes this requirement — do not paraphrase or interpret",
+      "security_domain": "security_policy | encryption | firewall | antivirus | authentication | update_management | device_compliance | data_protection | access_control | other",
+      "control_intent": "short_snake_case_description_of_the_control_goal",
+      "expected_value": "the required value as a string: a number (\"12\"), \"enabled\", \"disabled\", or null if not specified",
+      "operator": "minimum | maximum | exactly | null",
+      "expected_unit": "characters | days | attempts | versions | enabled_disabled | other | null",
+      "applicability": "who or what the requirement applies to, or null",
+      "strength": "mandatory | recommended | prohibited | informational",
+      "confidence": 0.0
+    }
+  ]
+}
 
-        Rules:
-        - requirement_id must start at REQ-001 and increment sequentially.
-        - source_text must summarize the relevant sentence or clause from the input.
-        - security_domain must use one of the listed categories.
-        - control_intent must be short, specific, and written in snake_case.
-        - expected_value must be null if no concrete value is stated.
-        - Do not infer technical configuration settings.
-        - Do not include explanations outside the JSON.
-        - The output must be parseable by json.loads().
-        """
-    
+Rules:
+- requirement_id must start at REQ-001 and increment sequentially.
+- source_text must be verbatim or near-verbatim from the input — do not paraphrase or interpret.
+- security_domain must use one of the listed categories
+- control_intent must be short, specific, and in snake_case (e.g., minimum_password_length, require_bitlocker_encryption).
+- expected_value must be null if no concrete value is stated. Do not infer or estimate.
+    - Use "enabled" or "disabled" for toggle settings
+    - Use a number as a string for numeric thresholds (e.g., "12", "90").
+- When expected_value is "enabled" or "disabled", expected_unit must be "enabled_disabled".
+- operator must be null if the requirement is not a measurable threshold.
+- confidence reflects how clearly the source text maps to an enforceable Intune setting:
+    - 1.0 = explicit, specific, and unambiguous
+    - 0.7 = implied but reasonably certain
+    - 0.4 = requires interpretation; edge case
+    - below 0.4 = likely excluded by the CRITICAL FILTER
+
+Examples:
+
+Numeric threshold —
+{
+  "requirement_id": "REQ-001",
+  "source_text": "Passwords must be at least 12 characters in length.",
+  "security_domain": "authentication",
+  "control_intent": "minimum_password_length",
+  "expected_value": "12",
+  "operator": "minimum",
+  "expected_unit": "characters",
+  "applicability": "all managed devices",
+  "strength": "mandatory",
+  "confidence": 0.95
+}
+
+Toggle setting —
+{
+  "requirement_id": "REQ-002",
+  "source_text": "BitLocker encryption must be enabled on all managed devices.",
+  "security_domain": "encryption",
+  "control_intent": "require_bitlocker_encryption",
+  "expected_value": "enabled",
+  "operator": null,
+  "expected_unit": "enabled_disabled",
+  "applicability": "all managed devices",
+  "strength": "mandatory",
+  "confidence": 0.98
+}
+"""
     user_prompt = f"""
     Extract structured security requirements from this policy text:
     {policy_file}
@@ -303,36 +341,6 @@ def policy_requirement_extractor(runtime: ToolRuntime) -> str:
     return json.dumps(parsed, indent=2)
 
 
-RELEVANCE_SYSTEM_PROMPT = """\
-You are an Intune settings discovery specialist. Your role is to identify which
-of the tenant's CURRENTLY CONFIGURED Intune settings are relevant to a given
-security policy or topic.
-
-You will receive:
-1. A security policy (free text).
-2. A JSON array of settings currently configured in the tenant. Each entry has
-   at minimum an id, name, description, platform, and configured value.
-
-Your task: return ONLY the settings from the input array that are relevant to
-the policy. Do not invent settings. Do not include settings unrelated to the
-policy. Preserve every field from the input verbatim — id, name, description,
-platform, configured value — exactly as given.
-
-Output format: a JSON object of the form
-{
-  "settings": [
-    { ...verbatim entry from input... },
-    ...
-  ]
-}
-
-Rules:
-- Use only IDs that appear in the input.
-- If no settings are relevant, return {"settings": []}.
-- Do not add explanations outside the JSON.
-- The output must be parseable by json.loads().
-"""
-
 @tool
 def check_security_policy(runtime: ToolRuntime) -> str:
     """
@@ -358,20 +366,35 @@ def check_security_policy(runtime: ToolRuntime) -> str:
 policy_agent = {
     "name": "policy_agent",
     "description": (
-        "Searches the tenant's configuration settings using semantic similarity. "
-        "Use this to find which configuration settings relate to a given topic "
-        "such as 'BitLocker', 'firewall inbound rules', or 'password complexity'."
+        "Extracts structured security requirements from the security policy document. "
+        "Calls policy_requirement_extractor to parse the policy and returns a JSON array "
+        "of requirements saved to policy_requirements.json. Use this as the first step "
+        "before any tenant or benchmark analysis."
     ),
     "system_prompt": ("""\
-You are a security policy specialist.
-Call the policy_requirement_extractor to extract the requirements out of the
-provided security policy.
-## Saving output\n
-    After calling find_configs_in_policies(), call write_file with:
-        path: 'policy_requirements.json'
-        content: the raw JSON string returned by policy_requirement_extractor\n"
-    Do this before summarising the results.
-    
+You are a security policy analyst. Your job is to extract structured requirements \
+from a security policy document provided by the user.
+
+Only extract requirements from the provided document — do not infer, assume, \
+or supplement from memory or training data.
+
+## Step 1 — Extract requirements
+Call policy_requirement_extractor (no arguments). It will read the security policy \
+and return a JSON array of requirements.
+
+## Step 2 — Save to file
+Write the tool's return value to the virtual filesystem:
+  path: policy_requirements.json
+  content: the exact string returned by the tool — do not reformat, \
+pretty-print, add markdown fences, or modify it in any way.
+
+## Step 3 — Output a summary
+After saving, produce a summary table with one row per requirement:
+
+| Requirement ID | Source Text | Security Domain |
+
+Keep the source text brief (one sentence max). Do not add prose outside the table \
+unless requirements could not be extracted.
 """
     ),
     "tools": [policy_requirement_extractor],
