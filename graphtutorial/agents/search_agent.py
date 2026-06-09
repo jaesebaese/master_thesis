@@ -1,5 +1,3 @@
-import logging
-
 from deepagents import create_deep_agent
 from langchain.chat_models import init_chat_model
 from langchain.tools import ToolRuntime, tool
@@ -7,9 +5,7 @@ from tavily import TavilyClient
 from dotenv import load_dotenv
 import os
 import json
-from rich_renderer import RichRenderer
-from activity_stream import astream_activity
-import asyncio
+
 
 
 OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"

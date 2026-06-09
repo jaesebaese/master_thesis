@@ -16,9 +16,17 @@ TENANT_SETTINGS_JSON = os.path.join(
     os.path.dirname(__file__),
     "../configurations/policies_and_settings_expand_assign.json",
 )
+TENANT_CHROMA_DB_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "../configurations/tenant_chroma_db",
+)
 
 INTUNE_SETTINGS_JSON = os.path.join(os.path.dirname(__file__), "../intune_configurations/intune_configuration_settings.json")
 
+TENANT_FLAT_JSON = os.path.join(
+    os.path.dirname(__file__),
+    "../configurations/tenant_settings_flat.json",
+)
 
 
 
@@ -133,16 +141,26 @@ def flatten_for_relevance(raw_policies: list, catalog: dict) -> list:
     return flat
 
 
-def build_tenant_collection(platform: str | None = None):
-    """Build a throwaway in-memory ChromaDB collection from the tenant's flat settings.
+def build_tenant_collection(platform: str | None = None, force_rebuild: bool = False):
+    """Build a persistent ChromaDB collection from the tenant's flat settings.
 
-    Uses EphemeralClient so nothing is persisted to disk. Deduplicates by setting ID,
-    keeping the first occurrence. Returns the collection ready for querying.
+    Uses PersistentClient so the collection survives across calls. Deduplicates by
+    setting ID, keeping the first occurrence. Returns the collection ready for querying.
 
     Args:
         platform: Optional case-insensitive substring filter on the 'platform' field
                   (e.g. "windows" to include only Windows settings). None = all platforms.
+        force_rebuild: Drop and recreate the collection even if it already exists.
     """
+    client = chromadb.PersistentClient(path=TENANT_CHROMA_DB_PATH)
+    ef = DefaultEmbeddingFunction()
+
+    existing = [c.name for c in client.list_collections()]
+    if "tenant_settings" in existing:
+        if not force_rebuild:
+            return client.get_collection("tenant_settings", embedding_function=ef)
+        client.delete_collection("tenant_settings")
+
     with open(INTUNE_SETTINGS_JSON) as f:
         catalog = {s["id"]: s for s in json.load(f)}
 
@@ -150,13 +168,16 @@ def build_tenant_collection(platform: str | None = None):
         policies = json.load(f)
 
     tenant_flat = flatten_for_relevance(policies, catalog)
-    client = chromadb.EphemeralClient()
-    ef = DefaultEmbeddingFunction()
     col = client.create_collection(
-        "tenant_settings_tmp",
+        "tenant_settings",
         embedding_function=ef,
         metadata={"hnsw:space": "cosine"},
     )
+
+    # Persist for downstream consumers
+    with open(TENANT_FLAT_JSON, "w") as f:
+        json.dump(tenant_flat, f, indent=2)
+
     seen: set[str] = set()
     ids, docs, metas = [], [], []
     platform_lower = platform.lower() if platform else None

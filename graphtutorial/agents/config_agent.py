@@ -8,9 +8,7 @@ import json
 import os
 from benchmark_agent import _file_data
 from rich_renderer import RichRenderer
-from policy_agent import SETTINGS_JSON
-from preprocessing_at_startup import build_tenant_collection, flatten_for_relevance
-from prompts import COMPLIANCE_CLASSIFY_SYSTEM
+from preprocessing_at_startup import build_tenant_collection, flatten_for_relevance, TENANT_SETTINGS_JSON, INTUNE_SETTINGS_JSON
 from activity_stream import astream_activity
 import asyncio
 
@@ -20,135 +18,6 @@ OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
 # Initialize the model
 model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature=0.0)
 
-
-def explain_policy_settings(policy_name: str) -> str:
-    """Look up a policy by name in policies_and_settings_expand.json, resolve each
-    configured setting against the full Intune settings definition catalog, and
-    return a structured JSON payload describing what every setting does and which
-    value is currently configured.  Pass this payload to the LLM to get a plain-
-    English explanation.
-
-    Args:
-        policy_name: Full or partial name of the policy (case-insensitive match).
-    """
-
-    config_path = os.path.join(
-        os.path.dirname(__file__), "../configurations/policies_and_settings_expand.json"
-    )
-    defs_path = os.path.join(
-        os.path.dirname(__file__),
-        "../intune_configurations/intune_configuration_settings.json",
-    )
-
-    with open(config_path) as f:
-        policies = json.load(f)
-
-    # Build a lookup dict once: definition id → definition object
-    with open(defs_path) as f:
-        definitions: dict = {d["id"]: d for d in json.load(f)}
-
-    # Find the first policy whose name contains policy_name (case-insensitive)
-    policy = next(
-        (p for p in policies if policy_name.lower() in p.get("name", "").lower()),
-        None,
-    )
-    if not policy:
-        available = [p["name"] for p in policies]
-        return json.dumps({"error": f"No policy found matching '{policy_name}'.", "available_policies": available})
-
-    # ------------------------------------------------------------------ #
-    # Recursively walk the settingInstance tree and collect every leaf    #
-    # ------------------------------------------------------------------ #
-    extracted: list[dict] = []
-
-    #TODO: make sure that the children don't count as separate settings in the final output - they should be nested under the parent setting they depend on, with an explanation that they only apply if the parent setting is configured a certain way.
-    def _extract(instance: dict) -> None:
-        dtype = instance.get("@odata.type", "")
-        sid = instance.get("settingDefinitionId", "")
-
-        if "ChoiceSettingInstance" in dtype:
-            chosen_id = instance.get("choiceSettingValue", {}).get("value", "")
-            extracted.append({"definitionId": sid, "chosenOptionId": chosen_id, "type": "choice"})
-            # A choice can have dependent children (e.g. sub-settings unlocked by a specific option)
-            for child in instance.get("choiceSettingValue", {}).get("children", []):
-                _extract(child)
-
-        elif "GroupSettingCollectionInstance" in dtype:
-            extracted.append({"definitionId": sid, "chosenOptionId": None, "type": "group"})
-            for group_val in instance.get("groupSettingCollectionValue", []):
-                for child in group_val.get("children", []):
-                    _extract(child)
-
-        elif "GroupSettingInstance" in dtype:
-            extracted.append({"definitionId": sid, "chosenOptionId": None, "type": "group"})
-            for child in instance.get("groupSettingValue", {}).get("children", []):
-                _extract(child)
-
-        elif "SimpleSettingCollectionInstance" in dtype:
-            values = [v.get("value") for v in instance.get("simpleSettingCollectionValue", [])]
-            extracted.append({"definitionId": sid, "chosenOptionId": values, "type": "simpleCollection"})
-
-        elif "SimpleSettingInstance" in dtype:
-            value = instance.get("simpleSettingValue", {}).get("value", "")
-            extracted.append({"definitionId": sid, "chosenOptionId": value, "type": "simple"})
-
-        else:
-            # Fallback: record what we have so nothing is silently dropped
-            extracted.append({"definitionId": sid, "chosenOptionId": None, "type": "unknown"})
-
-    for setting in policy.get("settings", []):
-        _extract(setting.get("settingInstance", {}))
-
-    # ------------------------------------------------------------------ #
-    # Enrich each extracted item with human-readable metadata             #
-    # ------------------------------------------------------------------ #
-    explanations = []
-    for item in extracted:
-        defn = definitions.get(item["definitionId"])
-        if defn is None:
-            # Definition not found in the catalog – still surface it
-            explanations.append({
-                "setting_id": item["definitionId"],
-                "setting_name": item["definitionId"],
-                "description": "Definition not found in the local catalog.",
-                "configured_value": item["chosenOptionId"],
-                "configured_value_label": str(item["chosenOptionId"]),
-            })
-            continue
-
-        entry: dict = {
-            "setting_id": item["definitionId"],
-            "setting_name": defn.get("displayName") or defn.get("name") or item["definitionId"],
-            "description": defn.get("description") or defn.get("helpText") or "",
-            "configured_value": item["chosenOptionId"],
-            "configured_value_label": str(item["chosenOptionId"]),  # default
-        }
-
-        #print(entry)
-
-        # For choice settings resolve the selected option's display name
-        if item["type"] == "choice" and item["chosenOptionId"]:
-            option_map = {
-                o["itemId"]: (o.get("displayName") or o.get("name") or o["itemId"])
-                for o in defn.get("options", [])
-            }
-            entry["configured_value_label"] = option_map.get(
-                item["chosenOptionId"], item["chosenOptionId"]
-            )
-            # Also expose all available options so the LLM understands the full range
-            entry["available_options"] = list(option_map.values())
-
-        explanations.append(entry)
-
-    result = {
-        "policy_name": policy["name"],
-        "description": policy.get("description", ""),
-        "platform": policy.get("platforms", ""),
-        "technologies": policy.get("technologies", ""),
-        "settings_count": len(explanations),
-        "settings": explanations,
-    }
-    return json.dumps(result, indent=2)
 
 @tool
 def find_configs_in_policies(runtime: ToolRuntime) -> str:
@@ -244,26 +113,6 @@ def find_configs_in_policies(runtime: ToolRuntime) -> str:
 
 
 @tool
-def analyze_configs() -> str:
-    """Retrieve and explain all currently configured security policies in the tenant.
-    Returns structured JSON with every setting name, configured value, and available
-    options for each policy."""
-
-    path = os.path.join(os.path.dirname(__file__), "../configurations", "policies_and_settings_expand.json")
-    with open(path, "r") as f:
-        configurations = json.load(f)
-
-    all_explanations = []
-    for config in configurations:
-        name = config.get("name", "")
-        explanation_json = explain_policy_settings(name)
-        all_explanations.append(json.loads(explanation_json))
-
-    return json.dumps(all_explanations, indent=2)
-
-
-
-@tool
 def find_configs_in_tenant(runtime: ToolRuntime) -> str:
     """Semantically match each security requirement from policy_requirements.json
     against the tenant's configured settings via a single batched vector search.
@@ -276,13 +125,10 @@ def find_configs_in_tenant(runtime: ToolRuntime) -> str:
     Each match includes: setting_id, setting_name, configured_value_label,
     configured_value, policy_name, similarity_score.
     """
-    with open(SETTINGS_JSON) as f:
+    with open(INTUNE_SETTINGS_JSON) as f:
         catalog = {s["id"]: s for s in json.load(f)}
 
-    tenant_path = os.path.join(
-        os.path.dirname(__file__), "../configurations/policies_and_settings_expand_assign.json"
-    )
-    with open(tenant_path) as f:
+    with open(TENANT_SETTINGS_JSON) as f:
         policies = json.load(f)
 
     tenant_flat = flatten_for_relevance(policies, catalog)
@@ -308,7 +154,7 @@ def find_configs_in_tenant(runtime: ToolRuntime) -> str:
         parsed = ast.literal_eval(requirements_str)
     req_list: list[dict] = parsed.get("requirements", parsed) if isinstance(parsed, dict) else parsed
 
-    tenant_collection = build_tenant_collection(platform="windows")
+    tenant_collection = build_tenant_collection(platform="windows")  # ensure the collection is built and get the instance
 
     query_texts = [
         f"{r.get('source_text', '')} {r.get('control_intent', '')}".strip()
@@ -542,8 +388,8 @@ config_agent = {
     "Step 5 — Return a summary table:\n"
     "Once all the files tools are finished and the files are written,"
     "produce a markdown table with these exact columns, in this order:\n"
-    "| Requirement ID | Requirement Description | Expected Value | "
-    "Tenant Configured Value | Setting Id | Setting Name | Policy Name | Compliance Status |\n\n"
+    "| Requirement ID | Requirement Description | Expected Value | Tenant Configured Value | "
+    "Setting Id | Setting Name | Setting Description | Policy Name | Compliance Status |\n\n"
 
     "Use all the information from requirements_vs_tenant.json to fill out the information in the table."
 
@@ -554,6 +400,7 @@ config_agent = {
     "- Tenant Configured Value: configured_value_label from the tenant match\n"
     "- Setting Id: setting_id from the tenant match\n"
     "- Setting Name: setting_name from the tenant match\n"
+    "- Setting Description: a one-sentence summary of the description from the tenant match\n"
     "- Policy Name: policy_name from the tenant match\n"
     "- Compliance Status: from requirements_vs_tenant.json\n\n"
     

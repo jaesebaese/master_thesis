@@ -5,10 +5,7 @@ import json
 import os
 from dotenv import load_dotenv
 import logging
-try:
-    from .preprocessing_at_startup import build_cis_benchmark_vector_db
-except ImportError:
-    from preprocessing_at_startup import build_cis_benchmark_vector_db
+from preprocessing_at_startup import TENANT_FLAT_JSON, build_cis_benchmark_vector_db, TENANT_SETTINGS_JSON, CIS_BENCHMARK_JSON
 
 
 load_dotenv()
@@ -161,20 +158,11 @@ def compare_to_cis_benchmark(query: str) -> str:
     Args:
         query: Optional context passed through for LLM use; not used for filtering.
     """
-    base = os.path.dirname(__file__)
 
-    cis_benchmark_path = os.path.join(
-        base,
-        "../configurations/cis_benchmarks/matched_all_level1.json",
-    )
-    policies_path = os.path.join(
-        base, "../configurations/policies_and_settings_expand.json"
-    )
-
-    with open(cis_benchmark_path) as f:
+    with open(CIS_BENCHMARK_JSON) as f:
         cis_data = json.load(f)
 
-    with open(policies_path) as f:
+    with open(TENANT_SETTINGS_JSON) as f:
         policies = json.load(f)
 
     # Build index: setting_definition_id -> [{policy_name, policy_id, raw_value, value_type}]
@@ -278,11 +266,7 @@ def compare_relevant_settings_to_benchmark(runtime: ToolRuntime) -> str:
         except FileNotFoundError:
             return "relevant_configs.json not found in virtual filesystem or on disk. Run config_agent first."
 
-    base = os.path.dirname(__file__)
-    cis_benchmark_path = os.path.join(
-        base, "../configurations/cis_benchmarks/matched_all_level1.json"
-    )
-    with open(cis_benchmark_path) as f:
+    with open(CIS_BENCHMARK_JSON) as f:
         cis_data = json.load(f)       
     # Support two formats:
     #   {"found": [...], "missing": [...]}  — written by find_configs_in_policies
@@ -442,12 +426,8 @@ def compare_relevant_settings_to_cis_benchmark(runtime: ToolRuntime, settings_to
                 "policy_id": item.get("policy_id", config.get("policy_id", "")),
             })
     base = os.path.dirname(__file__)
-    cis_benchmark_path = os.path.join(
-        base,
-        "../configurations/cis_benchmarks/matched_all_level1.json",
-    )
     
-    with open(cis_benchmark_path) as f:
+    with open(CIS_BENCHMARK_JSON) as f:
         cis_data = json.load(f)
     
     # Build CIS lookup index: setting_definition_id → {cis_entry, benchmark_policy_name}
@@ -663,11 +643,7 @@ def compare_search_results_to_tenant( runtime: ToolRuntime ) -> str:
     if not cis_settings:
         return json.dumps({"error": "No setting_definition_ids found in search results."})
 
-    base = os.path.dirname(__file__)
-
-    # Enrich each CIS setting with full benchmark details from matched_all_level1.json
-    cis_benchmark_path = os.path.join(base, "../configurations/cis_benchmarks/matched_all_level1.json")
-    with open(cis_benchmark_path) as f:
+    with open(CIS_BENCHMARK_JSON) as f:
         cis_data = json.load(f)
     cis_details: dict[str, dict] = {}
     for policy in cis_data.get("policies", []):
@@ -686,8 +662,7 @@ def compare_search_results_to_tenant( runtime: ToolRuntime ) -> str:
             }
 
     # Build tenant setting index from policies_and_settings_expand_assign.json
-    policies_path = os.path.join(base, "../configurations/policies_and_settings_expand_assign.json")
-    with open(policies_path) as f:
+    with open(TENANT_SETTINGS_JSON) as f:
         policies = json.load(f)
 
     setting_index: dict[str, list[dict]] = {}
@@ -837,11 +812,9 @@ def compare_requirements_results(runtime: ToolRuntime) -> str:
     if not settings:
         return json.dumps({"error": "No setting IDs found in either search output."})
 
-    base = os.path.dirname(__file__)
 
     # Enrich with full CIS benchmark details
-    cis_benchmark_path = os.path.join(base, "../configurations/cis_benchmarks/matched_all_level1.json")
-    with open(cis_benchmark_path) as f:
+    with open(CIS_BENCHMARK_JSON) as f:
         cis_data = json.load(f)
     cis_details: dict[str, dict] = {}
     for policy in cis_data.get("policies", []):
@@ -863,23 +836,20 @@ def compare_requirements_results(runtime: ToolRuntime) -> str:
                 "benchmark_policy": policy_name,
             }
 
-    # Build tenant setting index
-    policies_path = os.path.join(base, "../configurations/policies_and_settings_expand_assign.json")
-    with open(policies_path) as f:
-        policies = json.load(f)
+
+    with open(TENANT_FLAT_JSON) as f:
+        tenant_flat = json.load(f)
+
     setting_index: dict[str, list[dict]] = {}
-    for policy in policies:
-        policy_settings: list[dict] = []
-        for setting in policy.get("settings", []):
-            _collect_settings(setting.get("settingInstance", {}), policy_settings)
-        for s in policy_settings:
-            sid = s["setting_definition_id"]
-            setting_index.setdefault(sid, []).append({
-                "policy_name": policy.get("name", ""),
-                "policy_id": policy.get("id", ""),
-                "raw_value": s["raw_value"],
-                "value_type": s["value_type"],
-            })
+    for s in tenant_flat:
+        setting_index.setdefault(s["id"], []).append({
+            "policy_name": s["policy_name"],
+            "policy_id": s["policy_id"],
+            "setting_name": s["name"],
+            "raw_value": s["configured_value"],
+            "configured_value_label": s["configured_value_label"],
+            "value_type": s["type"],
+        })
 
     results = []
     for sid, info in settings.items():
@@ -990,11 +960,12 @@ benchmark_agent = {
         "Present results in this order:\n"
         "1. Compliance summary: total counts of COMPLIANT / NON-COMPLIANT / NOT CONFIGURED / NOT IN BENCHMARK\n"
         "2. Full compliance table with columns:\n"
-        "   Setting ID | Configured Value | CIS Recommended Value | Status | Matched Requirements\n"
-        "   - Setting ID: setting_definition_id\n"
-        "   - Configured Value: raw_value in tenant_configurations\n"
-        "   - CIS Recommended Value: cis_reference_value from the cis_benchmark\n"
+        "   Setting Name | Configured Value | CIS Recommended Value | Status | Policy Name | Matched Requirements\n"
+        "   - Setting Name: setting_name\n"
+        "   - Configured Value: configured_value_label in tenant_configurations\n"
+        "   - CIS Recommended Value: cis_reference_value_label from the cis_benchmark\n"
         "   - Status: compliance_status (any from the Status labels below)\n"
+        "   - Policy Name: policy_name from tenant_configurations\n"
         "   - Matched Requirements: list of matched_by_requirements"
 
         "3. Findings detail: one section per NON-COMPLIANT or NOT CONFIGURED setting (see below)\n\n"
@@ -1023,45 +994,9 @@ benchmark_agent = {
 
 bench_agent = create_deep_agent(
     middleware=[log_before_model, log_after_model, tool_logger],
-    system_prompt=(
-        "You are a CIS Benchmark compliance analyst for Microsoft Intune. "
-        "Your job is to map security policy requirements to CIS Benchmark controls "
-        "and check whether the tenant is compliant.\n\n"
-
-        "## Steps\n"
-        "1. Call search_cis_benchmark() with NO arguments — it reads policy_requirements.json "
-        "from the virtual filesystem automatically and returns matching CIS controls "
-        "per requirement.\n"
-        "2. Use the write_file tool and write the exact result fron search_cis_benchmark() into a file"
-        "called 'requirements_vs_benchmark.json'"
-        "3. Call to compare_search_results_to_tenant() — "
-        "it checks each matched CIS control against the tenant's configured policies "
-        "and returns a compliance verdict per setting.\n"
-        "4. Use the write_file tool and write the exact result of compare_search_results_to_tenant()"
-        " into a file called 'tenant_configs_vs_benchmark.json'"
-        "5. Present results as a compliance table with columns:\n"
-        "   Setting ID | Setting Name | CIS ID | Configured Value | "
-        "   CIS Recommended Value | Status | Tenant Policy Name\n"
-        "6. Use these status labels:\n"
-        "   - COMPLIANT: tenant value satisfies the CIS recommendation\n"
-        "   - NON-COMPLIANT: tenant value deviates from the CIS recommendation\n"
-        "   - NOT CONFIGURED: CIS recommends this setting but it is absent from all tenant policies\n"
-
-        "## For each NON-COMPLIANT setting\n"
-        "- State the current tenant value and the CIS recommended value.\n"
-        "- State the CIS rationale for why this value matters.\n"
-        "- State the remediation path from the CIS benchmark data.\n\n"
-
-        "## For each NOT CONFIGURED setting\n"
-        "- Flag this as a gap: the control provides no protection.\n"
-        "- State what CIS recommends, why it matters (rationale), and how to remediate.\n\n"
-
-        "## Important\n"
-        "Only use data from tool output. "
-        "Do not generate remediation steps from your own knowledge."
-    ),
+    system_prompt=benchmark_agent["system_prompt"],
     model=model,
-    tools=[search_benchmark, compare_search_results_to_tenant, compare_requirements_results])
+    tools=[search_benchmark, compare_requirements_results])
 
 def _file_data(path: str) -> dict:
     """Wrap a file's content in the FileData format deepagents expects."""

@@ -20,8 +20,6 @@ from rich_renderer import RichRenderer
 import asyncio
 from contextvars import ContextVar
 from langchain.agents.middleware import before_model, after_model
-from langchain_core.messages import ToolMessage
-
 
 
 
@@ -31,6 +29,8 @@ OPENAI_MODEL = "gpt-5.4-mini-2026-03-17"
 
 model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature=0.0)
 
+logger = logging.getLogger(__name__)
+renderer = RichRenderer(logger=logger)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -162,7 +162,7 @@ previous one to complete before proceeding.
 
 If a subagent returns an error, stop the pipeline and ask for human review before proceeding. Use the interrupt tool for this.
 
-## Workflow
+# Workflow
   Step 1: Delegate to policy_agent to extract all the requirements from the security policy.
   Step 2: Delegate to config_agent to find all security settings that match the requirements from the security policy.
   Step 3: Delegate to benchmark_agent to check whether the configurations are compliant with the CIS Benchmark.
@@ -170,56 +170,40 @@ If a subagent returns an error, stop the pipeline and ask for human review befor
   Step 5: Delegate to search_agent for Microsoft recommendations on settings NOT covered by CIS.
   Step 6: Only after all subagents have completed, produce the final report as a markdownfile written to "final_result.md". 
           The report must contain the following sections in order:
-
 ---
 
-### 1. Security Requirements Compliance
+## 1. Security Requirements Compliance
 
 Relay the summary table from the config_agent result unchanged.
 
 ---
 
-### 2. Benchmark Compliance
+## 2. Benchmark Compliance
 
-A table with EXACTLY these columns:
-
-| Setting | Configured | Recommended | Status | Policy Name |
-
-- Setting: name of the security setting
-- Configured: current value in the tenant
-- Recommended: the recommended value, using this precedence:
-    - If a CIS recommendation exists (from Step 3): use that
-    - If no CIS recommendation but a Microsoft recommendation exists (from Step 5):
-      use that and mark the row with [MS Docs]
-    - If neither exists: leave blank
-- Status:
-    - If CIS recommendation exists: COMPLIANT / NON-COMPLIANT / NOT CONFIGURED
-      based on comparison of Configured vs CIS Recommended
-    - If no CIS recommendation: NOT IN BENCHMARK (regardless of search_agent result)
-- Policy Name: the policy name where the setting is configured in the tenant
+Relay the compliance summary and table from the benchmark_agent result unchanged.
 
 ---
 
-### 3. Remediation
+## 3. Remediation
 
 List each NON-COMPLIANT and NOT CONFIGURED setting with its recommended value, rationale and the CIS Benchmark data
 returned by benchmark_agent. Do not generate remediation steps from your own knowledge. 
 
 ---
 
-### 4. Interdependencies
+## 4. Interdependencies
 
 Use the structured output from interdependency_agent:
 - List all entries from structural conflicts: setting name, conflict type, severity, and reason.
 - For unmet_catalog_prerequisites entries, show the dependency chain:
   <setting_name> → depends on → <missing_parent_name> (NOT CONFIGURED IN TENANT)
-- List informational entries (different-group-value) in a separate sub-section
-  labelled "Informational".
 - If both blocks are empty, write "No conflictinginterdependencies or conflicts identified."
+- List all the parent-child relationships identified, even if compliant:
+  <setting_name> → depends on → <parent_name> (COMPLIANT/NOT CONFIGURED)
 
 ---
 
-### 5. Web Search Results
+## 5. Web Search Results
 
 List each setting that used Microsoft documentation from the search_agent (Step 5) because it was not covered
 by the CIS Benchmark. For each:
@@ -230,7 +214,7 @@ by the CIS Benchmark. For each:
 
 ---
 
-### 6. Security Posture Summary
+## 6. Security Posture Summary
 
 A brief paragraph summarising the overall compliance posture, key risks, and recommended
 priorities. Base this only on the data presented in sections 1–5.
@@ -263,9 +247,27 @@ def handle_interrupt(interrupt_values) -> Command:
     decision = input("Continue pipeline? [y/n]: ").strip().lower()
     return Command(resume={"continue": decision != "n"})
 
+
+def start_agent():
+    #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
+
+    final_state = asyncio.run(
+        astream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+    )
+
+    for vpath, entry in (final_state.get("files") or {}).items():
+        name = vpath.lstrip("/")
+        if not name:
+            continue
+        out = _run_dir / name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        lines = entry.get("content", []) if isinstance(entry, dict) else []
+        out.write_text("\n".join(lines) if isinstance(lines, list) else str(lines))
+    logger.info("Run files written to %s", _run_dir)
+
+
 if __name__ == "__main__":
-    logger = logging.getLogger(__name__)
-    renderer = RichRenderer(logger=logger)
+
 
     #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
 

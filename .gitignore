@@ -19,6 +19,7 @@ env/
 graphtutorial/config.cfg
 graphtutorial/config.py
 
+graphtutorial/agents/runs
 # Tests
 graphtutorial/test_agent.py
 graphtutorial/test.py
