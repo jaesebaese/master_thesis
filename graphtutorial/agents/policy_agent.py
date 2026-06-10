@@ -1,12 +1,8 @@
-import os
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
 import json
-import chromadb
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from dotenv import load_dotenv
-import os
-from preprocessing_at_startup import TENANT_CHROMA_DB_PATH, TENANT_SETTINGS_JSON, build_tenant_collection
+from preprocessing_at_startup import build_tenant_collection
 
 
 load_dotenv()

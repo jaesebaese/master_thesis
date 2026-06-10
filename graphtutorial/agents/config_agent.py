@@ -1,9 +1,7 @@
 import logging
-
 from deepagents import create_deep_agent
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
-from typing import List
 import json
 import os
 from benchmark_agent import _file_data
@@ -117,7 +115,7 @@ def find_configs_in_tenant(runtime: ToolRuntime) -> str:
     """Semantically match each security requirement from policy_requirements.json
     against the tenant's configured settings via a single batched vector search.
 
-    Mirrors search_cis_benchmark's approach: all requirement queries are sent to
+    Mirrors search_benchmark's approach: all requirement queries are sent to
     ChromaDB in one call, no LLM step. Returns a list — one entry per requirement
     (including those with no matches, which get an empty tenant_matches array) —
     each with a 'tenant_matches' array of the most similar tenant settings.
@@ -171,7 +169,7 @@ def find_configs_in_tenant(runtime: ToolRuntime) -> str:
         matches = []
         for meta, dist in zip(metadatas, distances):
             score = round(1 - dist, 4)
-            if score < 0.50:
+            if score < 0.40:
                 continue
             cid = meta.get("id", "")
             tenant_hits = tenant_index.get(cid, [])
@@ -258,7 +256,7 @@ Examples:
 * A required security feature is disabled.
 * A configured version, age, length, or threshold is weaker than required.
 
-### partially_satisfied
+### partially_covered
 
 * Relevant settings exist and contribute to the requirement, but none fully implement the predicate, OR the predicate can't be evaluated against the available settings.
 
@@ -279,14 +277,14 @@ Use this status when:
 4. Only consider settings that are semantically relevant to the requirement.
 5. If multiple relevant settings exist:
    * If any direct setting exists: evaluate the predicate against direct settings only. 
-   * If only indirect settings exist: return partially_satisfied with an explanation of what they cover and what they miss.
+   * If only indirect settings exist: return partially_covered with an explanation of what they cover and what they miss.
    * If only irrelevant settings exist: return not_configured.
 6. If no relevant settings exist, return "not_configured". And specify in the explanation why none of the existing settings were relevant. 
 
 ## Severity Rules
 
 * status = "violated" → severity = "finding"
-* status = "satisfied" or "partially_satisfied" or "not_configured" → severity = "informational"
+* status = "satisfied" or "partially_covered" or "not_configured" → severity = "informational"
 
 ## Contributing Settings
 
@@ -389,7 +387,7 @@ config_agent = {
     "Once all the files tools are finished and the files are written,"
     "produce a markdown table with these exact columns, in this order:\n"
     "| Requirement ID | Requirement Description | Expected Value | Tenant Configured Value | "
-    "Setting Id | Setting Name | Setting Description | Policy Name | Compliance Status |\n\n"
+    "Setting Name | Setting Description | Policy Name | Compliance Status |\n\n"
 
     "Use all the information from requirements_vs_tenant.json to fill out the information in the table."
 
@@ -398,11 +396,10 @@ config_agent = {
     "- Requirement Description: the requirement's source_text field\n"
     "- Expected Value: the expected_value\n"
     "- Tenant Configured Value: configured_value_label from the tenant match\n"
-    "- Setting Id: setting_id from the tenant match\n"
     "- Setting Name: setting_name from the tenant match\n"
     "- Setting Description: a one-sentence summary of the description from the tenant match\n"
     "- Policy Name: policy_name from the tenant match\n"
-    "- Compliance Status: from requirements_vs_tenant.json\n\n"
+    "- Compliance Status: status from requirements_vs_tenant.json (VIOLATED, SATISFIED, PARTIALLY COVERED or NOT CONFIGURED)\n\n"
     
 
     "After the table, if any requirements are violated or not_configured, "

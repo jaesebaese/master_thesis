@@ -86,10 +86,10 @@ def _extract_task_content(result) -> str:
 
 def _task_result_is_error(content: str) -> bool:
     """Return True when a subagent result looks like an error or empty response."""
-    if "Error" in content or "error" in content[:50]:
-        return True
     try:
         data = json.loads(content)
+        if isinstance(data, dict) and "error" in data:
+            return True
         if isinstance(data, dict) and data.get("settings") == []:
             return True
         if isinstance(data, dict) and data.get("found") == [] and "missing" in data:
@@ -180,7 +180,7 @@ Relay the summary table from the config_agent result unchanged.
 
 ## 2. Benchmark Compliance
 
-Relay the compliance summary and table from the benchmark_agent result unchanged.
+Relay the compliance summary, the full compliance table, and the settings in detail from the benchmark_agent_result.md unchanged.
 
 ---
 

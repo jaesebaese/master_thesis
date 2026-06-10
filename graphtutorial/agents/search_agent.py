@@ -70,6 +70,8 @@ def tavily_search_specific_configurations(runtime: ToolRuntime) -> str:
         if r.get("cis_status") == "no_benchmark_reference" and r.get("setting_definition_id")
     ]
 
+    print(f"Settings with no CIS benchmark reference: {not_in_benchmark}")
+
     catalog = _load_catalog()
     search_results = []
 
@@ -153,7 +155,7 @@ s_agent = create_deep_agent(
         "## Output format\n"
         "Return a structured list. For each setting:\n"
         "- **Setting ID**: the raw setting definition ID\n"
-        "- **Setting Name**: the displayName from the catalog for this setting, or the setting ID if displayName is not available\n"
+        "- **Setting Name**: the name of the setting from the catalog or the setting ID if name is not available\n"
         "- **Description**: a one or two sentence summary of Microsoft's recommendation for this setting, based on the search results.\n"
         "- **Microsoft Recommendation**: one or two sentences summarising what "
         "Microsoft recommends for this setting, in plain language.\n"

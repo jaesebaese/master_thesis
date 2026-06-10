@@ -132,6 +132,13 @@ def _resolve_operator(stored_operator: str, cis_title: str) -> str:
     return stored_operator
 
 
+_AUDIT_RANK = {
+    "off": 0, "disabled": 0, "not configured": 0,
+    "audit": 1, "audit only": 1,
+    "warn": 2,
+    "block": 3, "block and audit": 3, "enabled": 3,
+}
+
 def check_compliance(tenant_value, cis_value, operator="=="):
     try:
         t = int(tenant_value)
@@ -142,7 +149,17 @@ def check_compliance(tenant_value, cis_value, operator="=="):
         if operator == "<":  return t < c
     except (ValueError, TypeError):
         pass
-    return str(tenant_value) == str(cis_value)
+    t_str = str(tenant_value).lower().strip()
+    c_str = str(cis_value).lower().strip()
+    if operator in (">=", ">", "<=", "<"):
+        t_rank = _AUDIT_RANK.get(t_str)
+        c_rank = _AUDIT_RANK.get(c_str)
+        if t_rank is not None and c_rank is not None:
+            if operator == ">=": return t_rank >= c_rank
+            if operator == "<=": return t_rank <= c_rank
+            if operator == ">":  return t_rank > c_rank
+            if operator == "<":  return t_rank < c_rank
+    return t_str == c_str
 
 
 @tool
@@ -568,7 +585,7 @@ def search_benchmark(runtime: ToolRuntime, requirements: str = "") -> str:
         matches = []
         for meta, distance in zip(metadatas, distances):
             score = round(1 - distance, 4)
-            if score > 0.5:
+            if score > 0.4:
                 matches.append({
                     "cis_id": meta.get("cis_id"),
                     "cis_section": meta.get("cis_section"),
@@ -778,7 +795,7 @@ def compare_requirements_results(runtime: ToolRuntime) -> str:
         return json.dumps({
             "error": (
                 "Neither requirements_vs_benchmark.json nor relevant_configurations.json "
-                "found. Run search_cis_benchmark and/or analyze_requirements_against_tenant first."
+                "found. Run search_benchmark and/or analyze_requirements_against_tenant first."
             )
         })
 
@@ -849,6 +866,7 @@ def compare_requirements_results(runtime: ToolRuntime) -> str:
             "raw_value": s["configured_value"],
             "configured_value_label": s["configured_value_label"],
             "value_type": s["type"],
+            "description": s["description"],
         })
 
     results = []
@@ -899,11 +917,10 @@ def compare_requirements_results(runtime: ToolRuntime) -> str:
                 "cis_reference_value_display": cis["cis_reference_value_display"],
                 "operator": cis["operator"],
                 "benchmark_policy": cis["benchmark_policy"],
+                "cis_rationale": cis["rationale"],
+                "cis_impact": cis["impact"],
+                "cis_remediation": cis["remediation"],
             }
-            if compliance_status == "non_compliant":
-                cis_block["rationale"] = cis["rationale"]
-                cis_block["impact"] = cis["impact"]
-                cis_block["remediation"] = cis["remediation"]
             record["cis_benchmark"] = cis_block
 
         record["tenant_configurations"] = tenant_configurations
@@ -929,7 +946,7 @@ benchmark_agent = {
     "name": "benchmark_agent",
     "description": (
         "Compares the tenant's configured settings against CIS benchmarks. "
-        "Always runs two steps: (1) search_cis_benchmark to find CIS controls matching "
+        "Always runs two steps: (1) search_benchmark to find CIS controls matching "
         "each policy requirement, then (2) compare_requirements_results to check whether "
         "the tenant's configured values comply with those CIS recommendations. "
     ),
@@ -940,10 +957,10 @@ benchmark_agent = {
 
         "## Workflow\n"
         "Complete these steps in order. Do not proceed to the next step until the current one is complete.\n\n"
-        "Step 1: Call search_cis_benchmark() with no arguments — it reads policy_requirements.json "
+        "Step 1: Call search_benchmark() with no arguments — it reads policy_requirements.json "
         "from the virtual filesystem and returns matching CIS controls per requirement.\n"
 
-        "Step 2: Write the exact result from search_cis_benchmark() to a file called "
+        "Step 2: Write the exact result from search_benchmark() to a file called "
         "'requirements_vs_benchmark.json' using the write_file tool.\n"
 
         "Step 3: Only after step 2 is complete, call compare_requirements_results() — "
@@ -958,32 +975,37 @@ benchmark_agent = {
         "## Output structure\n"
         "Use the data from 'tenant_configs_vs_benchmark.json' to present the compliance results. Do not use any other data source for the compliance status or configured values.\n\n"
         "Present results in this order:\n"
-        "1. Compliance summary: total counts of COMPLIANT / NON-COMPLIANT / NOT CONFIGURED / NOT IN BENCHMARK\n"
-        "2. Full compliance table with columns:\n"
+        "### 1. Compliance summary: \n"
+        "   - COMPLIANT: {compliant_count}\n"
+        "   - NON-COMPLIANT: {non_compliant_count}\n"
+        "   - NOT CONFIGURED: {not_configured_count}\n"
+        "   - NOT IN BENCHMARK: {not_in_benchmark_count}\n"
+
+        "### 2. Full compliance table with columns:\n"
         "   Setting Name | Configured Value | CIS Recommended Value | Status | Policy Name | Matched Requirements\n"
-        "   - Setting Name: setting_name\n"
+        "   - Setting Name: setting_name if available in tenant_configurations else cis_title if available in cis_benchmark else 'Unknown'\n"
         "   - Configured Value: configured_value_label in tenant_configurations\n"
         "   - CIS Recommended Value: cis_reference_value_label from the cis_benchmark\n"
         "   - Status: compliance_status (any from the Status labels below)\n"
         "   - Policy Name: policy_name from tenant_configurations\n"
         "   - Matched Requirements: list of matched_by_requirements"
 
-        "3. Findings detail: one section per NON-COMPLIANT or NOT CONFIGURED setting (see below)\n\n"
+        "### 3. Settings in detail: \n"
+        "Return a structured list. For each setting look up the information in tenant_configs_vs_benchmark:\n"
+        "**Setting ID**: the raw setting definition ID\n"
+        "- **Setting Name**: setting_name if available in tenant_configurations else cis_title if available in cis_benchmark else 'Unknown'\n"
+        "- **Description**: description if available in tenant_configurations\n"
+        "If there is a cis_benchmark match:\n"
+        "- **CIS Benchmark Rationale**: rationale if available in cis_benchmark\n"
+        "- **Recommended Value**: cis_reference_value_display if available in cis_benchmark."
+        "- **Impact**: cis_impact if available in cis_benchmark.\n\n"
+        "- **Remediation**: cis_remediation if available in cis_benchmark.\n\n"
 
         "## Status labels\n"
         "   - COMPLIANT: tenant value satisfies the CIS recommendation\n"
         "   - NON-COMPLIANT: tenant value deviates from the CIS recommendation\n"
         "   - NOT CONFIGURED: CIS recommends this setting but it is absent from all tenant policies\n"
         "   - NOT IN BENCHMARK: There is no CIS recommendation for the setting configured in the tenant"
-        
-        "## Findings detail\n"
-        "For each NON-COMPLIANT setting:\n"
-        "- Current tenant value and CIS recommended value\n"
-        "- CIS rationale for why this value matters\n"
-        "- Remediation path\n\n"
-        "For each NOT CONFIGURED setting:\n"
-        "- Flag as a gap: the control provides no protection\n"
-        "- CIS recommended value, rationale, and remediation path\n\n"
 
         "## Grounding rules\n"
         "- Configured values and compliance verdicts must come from tool output only — never from memory.\n"
