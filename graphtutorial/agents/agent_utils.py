@@ -11,6 +11,7 @@ This module defines the extended agent state structure that supports:
 
 import json
 import logging
+import re
 from io import StringIO
 
 from rich.console import Console
@@ -20,6 +21,16 @@ from rich.text import Text
 logger = logging.getLogger(__name__)
 
 console = Console()
+
+# Control characters (0x00–0x1F) except tab (0x09), newline (0x0A), carriage return (0x0D)
+# are illegal in JSON strings. Strip them before parsing to avoid decode errors from
+# LLM outputs or virtual-filesystem content that contains raw control chars.
+_CTRL_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+
+def safe_json_loads(text: str, **kwargs) -> any:
+    """Parse JSON after stripping illegal control characters."""
+    return json.loads(_CTRL_CHARS.sub('', text), **kwargs)
 
 
 def _log_rich(renderable):
@@ -161,7 +172,7 @@ def format_message_content(message):
 def _summarize_tool_content(raw: str) -> str:
     """Turn a raw tool result string into a readable summary."""
     try:
-        data = json.loads(raw)
+        data = safe_json_loads(raw)
     except (json.JSONDecodeError, TypeError):
         # Not JSON — truncate plain text
         return raw[:500] + ("..." if len(raw) > 500 else "")

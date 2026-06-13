@@ -12,7 +12,6 @@ https://docs.langchain.com/oss/python/deepagents/event-streaming
 The public API surface this relies on:
 
     run = agent.stream_events(input, version="v3")          # sync
-    run = await agent.astream_events(input, version="v3")   # async
 
     run.messages          -> ChatModelStream handles (coordinator)
     run.tool_calls        -> ToolCall handles (coordinator)
@@ -47,7 +46,6 @@ to drive a web UI) instead of / in addition to console rendering.
 
 from __future__ import annotations
 
-import asyncio
 import sys
 import threading
 import time
@@ -297,35 +295,47 @@ def _drain_subagent(sub: Any, emit: OnEvent, parent: str, depth: int) -> None:
         tool_input=getattr(sub, "task_input", None),
     ))
 
-    # Consume sub-projections in arrival order when the handle supports it,
-    # otherwise fall back to sequential (will miss tool_calls if projections
-    # share the same underlying stream).
+    # Mirror the coordinator pattern: use sub.interleave so all projections are
+    # subscribed (buffered) and consumed in arrival order. Skip "task" tool calls
+    # for the same reason as at coordinator level — draining them blocks until
+    # the nested subagent finishes, closing its stream before we can read it.
+    # Nested subagents are handled by recursing into _drain_subagent.
     if hasattr(sub, "interleave"):
         try:
             for item_name, item in sub.interleave("messages", "tool_calls", "subagents"):
                 if item_name == "messages":
                     _drain_message(item, emit, source, depth + 1)
                 elif item_name == "tool_calls":
-                    _drain_tool_call(item, emit, source, depth + 1)
+                    tool_name = getattr(item, "tool_name", "") or ""
+                    if tool_name == "task":
+                        emit(ActivityEvent(EventType.TOOL_START, source,
+                                           tool_name=tool_name,
+                                           tool_input=getattr(item, "input", None), depth=depth + 1))
+                        emit(ActivityEvent(EventType.TOOL_END, source,
+                                           tool_name=tool_name, text="", depth=depth + 1))
+                    else:
+                        _drain_tool_call(item, emit, source, depth + 1)
                 elif item_name == "subagents":
                     _drain_subagent(item, emit, source, depth + 1)
-        except (AttributeError, TypeError):
+        except Exception:  # noqa: BLE001
             pass
     else:
+        # Sequential fallback for handles without interleave. Iterating messages
+        # first drives the stream; tool_calls should still be buffered after.
         try:
             for message in sub.messages:
                 _drain_message(message, emit, source, depth + 1)
-        except (AttributeError, TypeError):
+        except Exception:  # noqa: BLE001
             pass
         try:
             for call in sub.tool_calls:
                 _drain_tool_call(call, emit, source, depth + 1)
-        except (AttributeError, TypeError):
+        except Exception:  # noqa: BLE001
             pass
         try:
             for nested in sub.subagents:
                 _drain_subagent(nested, emit, source, depth + 1)
-        except (AttributeError, TypeError):
+        except Exception:  # noqa: BLE001
             pass
 
     # Resolve final lifecycle status via .output.
@@ -371,10 +381,10 @@ def stream_activity(
         Enable ANSI colors in the console renderer (auto-disabled if stdout
         is not a TTY).
     interleave
-        When True, consume coordinator messages and subagents in arrival order
-        via ``run.interleave("messages", "tool_calls", "subagents")`` so output
-        reflects true execution order. When False, drain coordinator fully then
-        subagents (simpler, but less faithful ordering).
+        When True (default), drive the stream via ``run.interleave(...)`` so events
+        arrive in execution order. Deep Agents projection names ("tool_calls",
+        "subagents") may not be recognised as interleave keys, so a fallback
+        direct-attribute pass runs after the loop to catch any that were missed.
 
     Returns
     -------
@@ -404,18 +414,53 @@ def stream_activity(
     finally:
         emit(ActivityEvent(EventType.RUN_END, "coordinator"))
 
-    return getattr(run, "output", None)
+    output = getattr(run, "output", None)
+    return output() if callable(output) else output
 
 
 def _consume_interleaved(run: Any, emit: OnEvent) -> None:
-    """Consume coordinator + subagents in true arrival order."""
+    """Consume coordinator messages, tool calls, and subagents in arrival order.
+
+    "tool_calls" must be in the interleave so the projection is buffered.
+    However, "task" tool calls must NOT be drained normally — draining blocks
+    on call.output until the subagent finishes, which closes the subagent
+    stream before we can read it. Skip "task" entries entirely; their activity
+    is captured via the "subagents" projection. All other tool calls are drained
+    normally.
+    """
+    saw_subs = False
     for name, item in run.interleave("messages", "tool_calls", "subagents"):
         if name == "messages":
             _drain_message(item, emit, "coordinator", depth=1)
         elif name == "tool_calls":
-            _drain_tool_call(item, emit, "coordinator", depth=1)
+            tool_name = getattr(item, "tool_name", "") or ""
+            if tool_name == "task":
+                emit(ActivityEvent(EventType.TOOL_START, "coordinator",
+                                   tool_name=tool_name,
+                                   tool_input=getattr(item, "input", None), depth=1))
+                emit(ActivityEvent(EventType.TOOL_END, "coordinator",
+                                   tool_name=tool_name, text="", depth=1))
+            else:
+                _drain_tool_call(item, emit, "coordinator", depth=1)
         elif name == "subagents":
+            saw_subs = True
             _drain_subagent(item, emit, "coordinator", depth=1)
+
+    if not saw_subs:
+        try:
+            for sub in run.subagents:
+                _drain_subagent(sub, emit, "coordinator", depth=1)
+                for call in sub.tool_calls:
+                    print(f"[{sub.name} tool]", call.tool_name, call.input)
+                    for delta in call.output_deltas:
+                        print(delta, end="", flush=True)
+
+                    if call.completed and call.error is None:
+                        print(call.output)
+                    elif call.error is not None:
+                        print(call.error)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _consume_sequential(run: Any, emit: OnEvent) -> None:
@@ -426,146 +471,6 @@ def _consume_sequential(run: Any, emit: OnEvent) -> None:
         _drain_tool_call(call, emit, "coordinator", depth=1)
     for sub in run.subagents:
         _drain_subagent(sub, emit, "coordinator", depth=1)
-
-
-async def astream_activity(
-    agent: Any,
-    agent_input: Any,
-    *,
-    version: str = "v3",
-    on_event: Optional[OnEvent] = None,
-    render: bool = True,
-    color: bool = True,
-    config=None,
-) -> Any:
-    """Async variant. Consumes the coordinator stream and each subagent stream
-    concurrently with ``asyncio.gather`` so live output truly interleaves.
-
-    Mirrors the async pattern in the docs: ``await agent.astream_events(...)``
-    then gather over coordinator and subagent consumers.
-    """
-    sinks = []
-    if render:
-        sinks.append(ConsoleRenderer(color=color))
-    if on_event:
-        sinks.append(on_event)
-
-    lock = asyncio.Lock()
-
-    async def emit(ev: ActivityEvent) -> None:
-        async with lock:
-            for s in sinks:
-                s(ev)
-
-    run = await agent.astream_events(agent_input, version=version, config=config)
-    await emit(ActivityEvent(EventType.RUN_START, "coordinator"))
-
-    async def _drain_coord_messages() -> None:
-        async for message in run.messages:
-            await _adrain_message(message, emit, "coordinator", 1)
-
-    async def _drain_coord_tools() -> None:
-        async for call in run.tool_calls:
-            await _adrain_tool_call(call, emit, "coordinator", 1)
-
-    async def consume_subagents() -> None:
-        async for sub in run.subagents:
-            await _adrain_subagent(sub, emit, "coordinator", 1)
-
-    try:
-        await asyncio.gather(
-            _drain_coord_messages(),
-            _drain_coord_tools(),
-            consume_subagents(),
-        )
-    except Exception as exc:  # noqa: BLE001
-        await emit(ActivityEvent(EventType.ERROR, "coordinator", text=str(exc)))
-        raise
-    finally:
-        await emit(ActivityEvent(EventType.RUN_END, "coordinator"))
-
-    output = getattr(run, "output", None)
-    if output is None:
-        return None
-    return await output() if callable(output) else output
-
-
-# -- async drains (mirror the sync ones, awaiting async iterators) ---------- #
-async def _adrain_message(message: Any, emit, source: str, depth: int) -> None:
-    try:
-        async for delta in message.reasoning:
-            if delta:
-                await emit(ActivityEvent(EventType.AGENT_REASONING, source, text=str(delta), depth=depth))
-    except (AttributeError, TypeError):
-        pass
-    async for delta in message.text:
-        if delta:
-            await emit(ActivityEvent(EventType.AGENT_TEXT, source, text=str(delta), depth=depth))
-    await emit(ActivityEvent(EventType.AGENT_MESSAGE_DONE, source, depth=depth))
-
-
-async def _adrain_tool_call(call: Any, emit, source: str, depth: int) -> None:
-    await emit(ActivityEvent(EventType.TOOL_START, source,
-                             tool_name=getattr(call, "tool_name", "") or "",
-                             tool_input=getattr(call, "input", None), depth=depth))
-    try:
-        async for delta in call.output_deltas:
-            if delta:
-                await emit(ActivityEvent(EventType.TOOL_OUTPUT, source, text=str(delta), depth=depth))
-    except (AttributeError, TypeError):
-        pass
-    err = getattr(call, "error", None)
-    if err:
-        await emit(ActivityEvent(EventType.TOOL_ERROR, source, text=str(err),
-                                 tool_name=getattr(call, "tool_name", ""), depth=depth))
-    else:
-        out = getattr(call, "output", None)
-        await emit(ActivityEvent(EventType.TOOL_END, source, tool_name=getattr(call, "tool_name", ""),
-                                 text="" if out is None else str(out), depth=depth))
-
-
-async def _adrain_subagent(sub: Any, emit, parent: str, depth: int) -> None:
-    name = getattr(sub, "name", None) or getattr(sub, "graph_name", "subagent")
-    source = _label(parent, name)
-    path = tuple(getattr(sub, "path", ()) or ())
-    await emit(ActivityEvent(EventType.SUBAGENT_START, source,
-                             status=getattr(sub, "status", "started") or "started",
-                             path=path, depth=depth, tool_input=getattr(sub, "task_input", None)))
-
-    async def _messages() -> None:
-        try:
-            async for message in sub.messages:
-                await _adrain_message(message, emit, source, depth + 1)
-        except (AttributeError, TypeError):
-            pass
-
-    async def _tools() -> None:
-        try:
-            async for call in sub.tool_calls:
-                await _adrain_tool_call(call, emit, source, depth + 1)
-        except (AttributeError, TypeError):
-            pass
-
-    async def _nested() -> None:
-        try:
-            async for nested in sub.subagents:
-                await _adrain_subagent(nested, emit, source, depth + 1)
-        except (AttributeError, TypeError):
-            pass
-
-    await asyncio.gather(_messages(), _tools(), _nested())
-
-    try:
-        output = sub.output
-        if asyncio.iscoroutine(output):
-            output = await output
-        final = getattr(sub, "status", "completed") or "completed"
-        if final in ("started", "running"):
-            final = "completed"
-        await emit(ActivityEvent(EventType.SUBAGENT_END, source, status=final, path=path, depth=depth))
-    except Exception as exc:  # noqa: BLE001
-        await emit(ActivityEvent(EventType.SUBAGENT_END, source, status="failed",
-                                 path=path, depth=depth, extra={"error": str(exc)}))
 
 
 # --------------------------------------------------------------------------- #

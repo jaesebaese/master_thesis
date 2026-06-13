@@ -42,6 +42,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from activity_stream import ActivityEvent, EventType
+from agent_utils import safe_json_loads
 
 
 # --------------------------------------------------------------------------- #
@@ -55,7 +56,7 @@ def summarize_tool_content(raw: str, *, limit: int = 800) -> str:
     """
     raw = raw or ""
     try:
-        data = json.loads(raw)
+        data = safe_json_loads(raw)
     except (json.JSONDecodeError, TypeError):
         return raw[:500] + ("..." if len(raw) > 500 else "")
 
@@ -309,7 +310,7 @@ class RichRenderer:
             # Convert Python repr whitespace escapes so json.loads and splitlines work
             parseable = unwrapped.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
             try:
-                pretty = json.dumps(json.loads(parseable), indent=2, ensure_ascii=False)
+                pretty = json.dumps(safe_json_loads(parseable), indent=2, ensure_ascii=False)
             except (json.JSONDecodeError, TypeError):
                 pretty = parseable
             all_lines = pretty.splitlines()

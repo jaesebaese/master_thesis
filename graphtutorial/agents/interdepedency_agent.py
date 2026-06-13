@@ -1,13 +1,12 @@
-import asyncio
-
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
 import json
 import os
-from activity_stream import astream_activity
+from activity_stream import stream_activity
 from rich_renderer import RichRenderer
 from preprocessing_at_startup import TENANT_FLAT_JSON, TENANT_SETTINGS_JSON, build_tenant_collection
 from deepagents import create_deep_agent
+from agent_utils import safe_json_loads
 import logging
 
 
@@ -84,7 +83,7 @@ def find_catalog_interdependencies(runtime: ToolRuntime) -> str:
     else:
         content_str = str(file_entry)
 
-    benchmark_output = json.loads(content_str)
+    benchmark_output = safe_json_loads(content_str)
 
     results = benchmark_output.get("results", [])
     setting_ids = [r["setting_definition_id"] for r in results if r.get("setting_definition_id")]
@@ -364,7 +363,5 @@ if __name__ == "__main__":
     }
     run_config = {"configurable": {"thread_id": "1"}}
 
-    final_state = asyncio.run(
-        astream_activity(int_agent_main, agent_input=pending, config=run_config, render=False, on_event=renderer)
-    )
+    final_state = stream_activity(int_agent_main, agent_input=pending, config=run_config, render=False, on_event=renderer)
     print("\nFINAL STATE:\n" + json.dumps(final_state, indent=2))

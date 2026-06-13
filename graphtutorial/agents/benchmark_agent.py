@@ -3,6 +3,7 @@ from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
 import json
 import os
+from agent_utils import safe_json_loads
 from dotenv import load_dotenv
 import logging
 from preprocessing_at_startup import TENANT_FLAT_JSON, build_cis_benchmark_vector_db, TENANT_SETTINGS_JSON, CIS_BENCHMARK_JSON
@@ -273,7 +274,7 @@ def compare_relevant_settings_to_benchmark(runtime: ToolRuntime) -> str:
         else:
             # Raw string passed directly
             content_str = str(file_entry)
-        relevant = json.loads(content_str)
+        relevant = safe_json_loads(content_str)
     else:
         # Fall back to disk — find_configs_in_policies writes it there directly
         disk_path = os.path.join(os.path.dirname(__file__), "relevant_configs.json")
@@ -412,7 +413,7 @@ def compare_relevant_settings_to_cis_benchmark(runtime: ToolRuntime, settings_to
                 content_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
             else:
                 content_str = str(file_entry)
-            relevant = json.loads(content_str)
+            relevant = safe_json_loads(content_str)
         else:
             disk_path = os.path.join(os.path.dirname(__file__), "relevant_configs.json")
             try:
@@ -560,7 +561,7 @@ def search_benchmark(runtime: ToolRuntime, requirements: str = "") -> str:
         requirements = str(file_entry)
 
     try:
-        parsed = json.loads(requirements)
+        parsed = safe_json_loads(requirements)
     except json.JSONDecodeError:
         import ast
         parsed = ast.literal_eval(requirements)
@@ -631,7 +632,7 @@ def compare_search_results_to_tenant( runtime: ToolRuntime ) -> str:
         requirements = str(file_entry)
 
     try:
-        parsed = json.loads(requirements)
+        parsed = safe_json_loads(requirements)
     except json.JSONDecodeError:
         import ast
         parsed = ast.literal_eval(requirements)
@@ -783,7 +784,7 @@ def compare_requirements_results(runtime: ToolRuntime) -> str:
         else:
             s = str(entry)
         try:
-            return json.loads(s)
+            return safe_json_loads(s)
         except json.JSONDecodeError:
             import ast
             return ast.literal_eval(s)

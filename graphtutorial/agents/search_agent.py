@@ -5,6 +5,7 @@ from tavily import TavilyClient
 from dotenv import load_dotenv
 import os
 import json
+from agent_utils import safe_json_loads
 
 
 
@@ -61,7 +62,7 @@ def tavily_search_specific_configurations(runtime: ToolRuntime) -> str:
     else:
         content_str = str(file_entry)
 
-    benchmark_output = json.loads(content_str)
+    benchmark_output = safe_json_loads(content_str)
     results = benchmark_output.get("results", [])
 
     not_in_benchmark = [

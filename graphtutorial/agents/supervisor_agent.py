@@ -15,9 +15,9 @@ from dotenv import load_dotenv
 import logging
 import os
 import time
-from activity_stream import astream_activity
+from activity_stream import stream_activity
 from rich_renderer import RichRenderer
-import asyncio
+from agent_utils import safe_json_loads
 from contextvars import ContextVar
 from langchain.agents.middleware import before_model, after_model
 
@@ -87,7 +87,7 @@ def _extract_task_content(result) -> str:
 def _task_result_is_error(content: str) -> bool:
     """Return True when a subagent result looks like an error or empty response."""
     try:
-        data = json.loads(content)
+        data = safe_json_loads(content)
         if isinstance(data, dict) and "error" in data:
             return True
         if isinstance(data, dict) and data.get("settings") == []:
@@ -100,15 +100,15 @@ def _task_result_is_error(content: str) -> bool:
 
 
 @wrap_tool_call
-async def task_error_guard(request, handler):
+def task_error_guard(request, handler):
     """After a task (subagent) call completes, pause for human review if the result looks like an error."""
     if request.tool_call["name"] != "task":
-        return await handler(request)
+        return handler(request)
     try:
-        result = await handler(request)
+        result = handler(request)
     except Exception as exc:
         subagent = request.tool_call["args"].get("subagent_type", "?")
-        human_decision = interrupt({
+        interrupt({
             "subagent": subagent,
             "error_preview": str(exc)[:500],
             "message": f"'{subagent}' raised an exception. Continue pipeline?",
@@ -116,7 +116,7 @@ async def task_error_guard(request, handler):
         return ToolMessage(
             content=f"Pipeline aborted after exception in '{subagent}': {exc}",
             tool_call_id=request.tool_call["id"],
-    )
+        )
 
     content = _extract_task_content(result)
     if _task_result_is_error(content):
@@ -142,7 +142,7 @@ _run_dir.mkdir(parents=True, exist_ok=True)
 
 agent = create_deep_agent(
     model=model,
-    middleware=[task_error_guard, log_before_model, log_after_model],
+    middleware=[log_before_model, log_after_model],
     subagents=[policy_agent, benchmark_agent, config_agent, interdependency_agent, search_agent],
     checkpointer=checkpointer,
     system_prompt = """
@@ -251,9 +251,7 @@ def handle_interrupt(interrupt_values) -> Command:
 def start_agent():
     #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
 
-    final_state = asyncio.run(
-        astream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
-    )
+    final_state = stream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
 
     for vpath, entry in (final_state.get("files") or {}).items():
         name = vpath.lstrip("/")
@@ -271,9 +269,7 @@ if __name__ == "__main__":
 
     #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
 
-    final_state = asyncio.run(
-        astream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
-    )
+    final_state = stream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
 
     for vpath, entry in (final_state.get("files") or {}).items():
         name = vpath.lstrip("/")

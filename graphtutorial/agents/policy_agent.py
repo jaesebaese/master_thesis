@@ -3,6 +3,7 @@ from langchain.tools import tool, ToolRuntime
 import json
 from dotenv import load_dotenv
 from preprocessing_at_startup import build_tenant_collection
+from agent_utils import safe_json_loads
 
 
 load_dotenv()
@@ -157,7 +158,7 @@ Toggle setting —
         raw_output = raw_output.replace("```json", "").replace("```", "").strip()
 
     try:
-        parsed = json.loads(raw_output)
+        parsed = safe_json_loads(raw_output)
     except json.JSONDecodeError:
         return json.dumps({
             "requirements": [],

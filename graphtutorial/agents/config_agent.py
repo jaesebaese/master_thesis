@@ -5,10 +5,10 @@ from langchain.tools import tool, ToolRuntime
 import json
 import os
 from benchmark_agent import _file_data
+from agent_utils import safe_json_loads
 from rich_renderer import RichRenderer
 from preprocessing_at_startup import build_tenant_collection, flatten_for_relevance, TENANT_SETTINGS_JSON, INTUNE_SETTINGS_JSON
-from activity_stream import astream_activity
-import asyncio
+from activity_stream import stream_activity
 
 OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
 
@@ -43,7 +43,7 @@ def find_configs_in_policies(runtime: ToolRuntime) -> str:
                 content_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
             else:
                 content_str = str(file_entry)
-            data = json.loads(content_str)
+            data = safe_json_loads(content_str)
         else:
             disk_path = os.path.join(os.path.dirname(__file__), "policy_results.json")
             try:
@@ -146,7 +146,7 @@ def find_configs_in_tenant(runtime: ToolRuntime) -> str:
         requirements_str = str(file_entry)
 
     try:
-        parsed = json.loads(requirements_str)
+        parsed = safe_json_loads(requirements_str)
     except json.JSONDecodeError:
         import ast
         parsed = ast.literal_eval(requirements_str)
@@ -222,7 +222,7 @@ def evaluate_requirements_compliance(runtime: ToolRuntime) -> str:
             requirements_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
         else:
             requirements_str = str(file_entry)
-        requirements_list = json.loads(requirements_str, strict=False)
+        requirements_list = safe_json_loads(requirements_str)
 
     user_prompt = (
         "Classify each requirement's compliance status based on the tenant settings.\n\n"
@@ -342,7 +342,7 @@ Output schema:
         raw = raw.replace("```json", "").replace("```", "").strip()
 
     try:
-        result = json.loads(raw)
+        result = safe_json_loads(raw)
     except json.JSONDecodeError as e:
         return json.dumps({"error": f"Invalid JSON from model: {e}", "raw_output": raw[:200]})
 
@@ -425,7 +425,5 @@ if __name__ == "__main__":
     }
     run_config = {"configurable": {"thread_id": "1"}}
 
-    final_state = asyncio.run(
-        astream_activity(co_agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
-    )
+    final_state = stream_activity(co_agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
     print("\nFINAL STATE:\n" + json.dumps(final_state, indent=2))
