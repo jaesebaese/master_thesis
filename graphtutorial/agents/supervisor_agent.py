@@ -174,20 +174,20 @@ If a subagent returns an error, stop the pipeline and ask for human review befor
 
 ## 1. Security Requirements Compliance
 
-Relay the summary table from the config_agent result unchanged.
+Relay the summary table from the config_agent result unchanged and include the legend.
 
 ---
 
 ## 2. Benchmark Compliance
 
-Relay the compliance summary, the full compliance table, and the settings in detail from the benchmark_agent_result.md unchanged.
+Relay the compliance summary and the full compliance table from the benchmark_agent_result.md unchanged.
 
 ---
 
 ## 3. Remediation
 
 List each NON-COMPLIANT and NOT CONFIGURED setting with its recommended value, rationale and the CIS Benchmark data
-returned by benchmark_agent. Do not generate remediation steps from your own knowledge. 
+returned by benchmark_agent. Do not generate remediation steps from your own knowledge. Include the hint for the user.
 
 ---
 

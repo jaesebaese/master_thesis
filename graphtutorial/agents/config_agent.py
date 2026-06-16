@@ -353,7 +353,7 @@ config_agent = {
     "name": "config_agent",
     "description": (
         "Retrieves Intune tenant configurations and evaluates security policy compliance. "
-        "Always runs two steps: (1) find_configs_in_tenant to match security requirements "
+        "Always runs two tools: (1) find_configs_in_tenant to match security requirements "
         "against tenant settings via vector search, then (2) evaluate_requirements_compliance "
         "to classify each requirement as satisfied, violated, or not_configured. "
     ),
@@ -405,6 +405,13 @@ config_agent = {
     "After the table, if any requirements are violated or not_configured, "
     "add a brief bulleted list of recommended remediation steps. "
     "Do not re-explain findings already visible in the table.\n"
+
+    "Add a small legend at the end:\n"
+    "- SATISFIED: specific tenant configurations meet the requirement\n"
+    "- VIOLATED: at least one tenant configuration contradicts the requirement\n"
+    "- PARTIALLY COVERED: some relevant settings are configured but not all aspects are met\n"
+    "- NOT CONFIGURED: no relevant settings were found in the tenant for this requirement\n"
+
         ),
     "tools": [find_configs_in_tenant, evaluate_requirements_compliance],
     "model": model,

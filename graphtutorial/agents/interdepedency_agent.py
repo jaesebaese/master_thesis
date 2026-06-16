@@ -1,15 +1,16 @@
+from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool, ToolRuntime
 import json
 import os
 from activity_stream import stream_activity
 from rich_renderer import RichRenderer
-from preprocessing_at_startup import TENANT_FLAT_JSON, TENANT_SETTINGS_JSON, build_tenant_collection
+from preprocessing_at_startup import INTUNE_SETTINGS_JSON, TENANT_FLAT_JSON, TENANT_SETTINGS_JSON, build_tenant_collection
 from deepagents import create_deep_agent
 from agent_utils import safe_json_loads
 import logging
 
-
+load_dotenv()
 
 OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
 OLLAMA_MODEL = "mistral-nemo:latest"
@@ -93,8 +94,18 @@ def find_catalog_interdependencies(runtime: ToolRuntime) -> str:
         return json.dumps({"error": "No setting_definition_ids found."})
 
     # Load catalog
-    with open(TENANT_SETTINGS_JSON) as f:
+    with open(INTUNE_SETTINGS_JSON) as f:
         catalog = {s["id"]: s for s in json.load(f)}
+
+    with open(TENANT_SETTINGS_JSON) as f:
+        policies = json.load(f)
+
+    with open(TENANT_FLAT_JSON) as f:
+        tenant_flat = json.load(f)
+
+    tenant_index: dict[str, list[dict]] = {}
+    for s in tenant_flat:
+        tenant_index.setdefault(s["id"], []).append(s)
 
     # Catalog lookup — collect parent→child mapping via dependentOn
     catalog_hits: dict[str, dict] = {}
@@ -113,16 +124,6 @@ def find_catalog_interdependencies(runtime: ToolRuntime) -> str:
     parent_ids = set(parent_to_children.keys())
     new_parent_ids = parent_ids - set(setting_ids)
     parent_catalog_hits = {pid: catalog[pid] for pid in new_parent_ids if pid in catalog}
-
-    with open(TENANT_SETTINGS_JSON) as f:
-        policies = json.load(f)
-
-    with open(TENANT_FLAT_JSON) as f:
-        tenant_flat = json.load(f)
-
-    tenant_index: dict[str, list[dict]] = {}
-    for s in tenant_flat:
-        tenant_index.setdefault(s["id"], []).append(s)
 
     policy_groups: dict[str, set[str]] = {}
     for policy in policies:
@@ -364,4 +365,3 @@ if __name__ == "__main__":
     run_config = {"configurable": {"thread_id": "1"}}
 
     final_state = stream_activity(int_agent_main, agent_input=pending, config=run_config, render=False, on_event=renderer)
-    print("\nFINAL STATE:\n" + json.dumps(final_state, indent=2))

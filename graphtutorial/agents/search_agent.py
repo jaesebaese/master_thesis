@@ -156,7 +156,6 @@ s_agent = create_deep_agent(
         "## Output format\n"
         "Return a structured list. For each setting:\n"
         "- **Setting ID**: the raw setting definition ID\n"
-        "- **Setting Name**: the name of the setting from the catalog or the setting ID if name is not available\n"
         "- **Description**: a one or two sentence summary of Microsoft's recommendation for this setting, based on the search results.\n"
         "- **Microsoft Recommendation**: one or two sentences summarising what "
         "Microsoft recommends for this setting, in plain language.\n"
