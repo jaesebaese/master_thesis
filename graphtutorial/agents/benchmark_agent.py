@@ -1086,7 +1086,7 @@ benchmark_agent = {
 
         "Step 4: Write the full JSON response from compare_requirements_results() to a file called "
         "'tenant_configs_vs_benchmark.json' using the write_file tool."
-        "It is important that you include the entire JSON output with all settings included, not just a summary."
+        "It is important that you include the entire JSON output with ALL SETTINGS included, not just a summary."
         "Make sure that the JSON is valid and properly formatted.\n"
 
         "Step 5: Only after step 4 is complete, call generate_full_settings_report() — "

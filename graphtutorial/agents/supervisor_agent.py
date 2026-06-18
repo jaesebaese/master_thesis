@@ -18,7 +18,6 @@ import time
 from activity_stream import stream_activity
 from rich_renderer import RichRenderer
 from agent_utils import safe_json_loads
-from contextvars import ContextVar
 from langchain.agents.middleware import before_model, after_model
 
 
@@ -39,17 +38,20 @@ logging.basicConfig(
         logging.FileHandler("agent.log", mode='w'),
     ],)
 
-_start = ContextVar("model_start", default=None)
+_start = None
+_input_tokens = 0
+_output_tokens = 0
 
 @before_model
 def log_before_model(state, runtime):
-    _start.set(time.time())
+    global _start
+    _start = time.time()
     return None
 
 @after_model
 def log_after_model(state, runtime):
-    started = _start.get()
-    elapsed = time.time() - started if started else 0
+    global _start, _input_tokens, _output_tokens
+    elapsed = time.time() - _start if _start else 0
     last_msg = state["messages"][-1]
 
     tool_calls = getattr(last_msg, "tool_calls", None) or []
@@ -65,6 +67,8 @@ def log_after_model(state, runtime):
         f"{usage.get('input_tokens', '?')}→{usage.get('output_tokens', '?')}",
         [tc["name"] for tc in tool_calls] if tool_calls else "none",
     )
+    _input_tokens += usage.get('input_tokens', 0)
+    _output_tokens += usage.get('output_tokens', 0)
     return None
 
 
@@ -233,10 +237,6 @@ def _file_data(path: str) -> dict:
     return {"content": lines, "created_at": now, "modified_at": now}
 
 run_config = {"configurable": {"thread_id": "1"}}
-pending: Any = {
-    "messages": [{"role": "user", "content": query}],
-    "files": {"security_policy.txt": _file_data(os.path.join(os.path.dirname(__file__), "security_policy.txt"))},
-}
 
 def handle_interrupt(interrupt_values) -> Command:
     for iv in interrupt_values:
@@ -249,9 +249,14 @@ def handle_interrupt(interrupt_values) -> Command:
 
 
 def start_agent():
-    #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
+    pending: Any = {
+        "messages": [{"role": "user", "content": query}],
+        "files": {"security_policy.txt": _file_data(os.path.join(os.path.dirname(__file__), "security_policy.txt"))},
+    }
 
+    _run_start = time.time()
     final_state = stream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+    _run_elapsed = time.time() - _run_start
 
     for vpath, entry in (final_state.get("files") or {}).items():
         name = vpath.lstrip("/")
@@ -262,14 +267,20 @@ def start_agent():
         lines = entry.get("content", []) if isinstance(entry, dict) else []
         out.write_text("\n".join(lines) if isinstance(lines, list) else str(lines))
     logger.info("Run files written to %s", _run_dir)
+    logger.info("Total run time: %.1fs | tokens: %d in, %d out", _run_elapsed, _input_tokens, _output_tokens)
 
 
 if __name__ == "__main__":
-
+    pending: Any = {
+        "messages": [{"role": "user", "content": query}],
+        "files": {"security_policy.txt": _file_data(os.path.join(os.path.dirname(__file__), "security_policy.txt"))},
+    }
 
     #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
 
+    _run_start = time.time()
     final_state = stream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+    _run_elapsed = time.time() - _run_start
 
     for vpath, entry in (final_state.get("files") or {}).items():
         name = vpath.lstrip("/")
@@ -280,3 +291,4 @@ if __name__ == "__main__":
         lines = entry.get("content", []) if isinstance(entry, dict) else []
         out.write_text("\n".join(lines) if isinstance(lines, list) else str(lines))
     logger.info("Run files written to %s", _run_dir)
+    logger.info("Total run time: %.1fs | Total amount of tokens: %d in, %d out", _run_elapsed, _input_tokens, _output_tokens)
