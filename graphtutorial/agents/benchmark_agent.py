@@ -9,6 +9,7 @@ import logging
 from preprocessing_at_startup import TENANT_FLAT_JSON, build_cis_benchmark_vector_db, TENANT_SETTINGS_JSON, CIS_BENCHMARK_JSON
 from activity_stream import stream_activity
 from rich_renderer import RichRenderer
+import re
 
 load_dotenv()
 
@@ -17,7 +18,9 @@ OPENAI_API_MODEL = "gpt-5.4-mini-2026-03-17"
 
 # Initialize the model
 #model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
-model = init_chat_model(model=OPENAI_API_MODEL, model_provider="openai", temperature=0.0)
+MODEL = "openai:gpt-5.4-mini-2026-03-17"
+
+model = init_chat_model(model=MODEL)
 
 """ model = init_chat_model(
     model=OLLAMA_MODEL,
@@ -127,10 +130,12 @@ def _resolve_operator(stored_operator: str, cis_title: str) -> str:
     if stored_operator != "==":
         return stored_operator
     t = cis_title.lower()
-    if any(p in t for p in ("or more", "or greater", "or higher", "or above", "min", "min.", "minimum")):
-        return ">="
-    if any(p in t for p in ("or fewer", "or less", "or lower", "or below", "max", "max.", "maximum")):
+    ge_patterns = (r"or more", r"or greater", r"or higher", r"or above", r"\bmin\b", r"\bmin\.\b", r"\bminimum\b")
+    le_patterns = (r"or fewer", r"or less", r"or lower", r"or below", r"\bmax\b", r"\bmax\.\b", r"\bmaximum\b")
+    if any(re.search(p, t) for p in le_patterns):
         return "<="
+    if any(re.search(p, t) for p in ge_patterns):
+        return ">="
     return stored_operator
 
 
