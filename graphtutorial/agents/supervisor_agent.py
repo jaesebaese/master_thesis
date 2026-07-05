@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
+from langgraph.errors import GraphInterrupt
+from langchain_core.messages import ToolMessage
 from dotenv import load_dotenv
 import logging
 import os
@@ -24,9 +26,9 @@ from langchain.agents.middleware import before_model, after_model
 
 load_dotenv()
 
-OPENAI_MODEL = "gpt-5.4-mini-2026-03-17"
+MODEL = "openai:gpt-5.4-mini-2026-03-17"
 
-model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature=0.0)
+model = init_chat_model(model=MODEL)
 
 logger = logging.getLogger(__name__)
 renderer = RichRenderer(logger=logger)
@@ -103,24 +105,39 @@ def _task_result_is_error(content: str) -> bool:
     return False
 
 
+_RETRYABLE_ERRORS = ("RemoteProtocolError", "incomplete chunked read", "peer closed connection")
+
+
 @wrap_tool_call
 def task_error_guard(request, handler):
-    """After a task (subagent) call completes, pause for human review if the result looks like an error."""
+    """Intercept task (subagent) calls: retry on network errors, prompt human on other failures."""
     if request.tool_call["name"] != "task":
         return handler(request)
-    try:
-        result = handler(request)
-    except Exception as exc:
-        subagent = request.tool_call["args"].get("subagent_type", "?")
-        interrupt({
-            "subagent": subagent,
-            "error_preview": str(exc)[:500],
-            "message": f"'{subagent}' raised an exception. Continue pipeline?",
-        })
-        return ToolMessage(
-            content=f"Pipeline aborted after exception in '{subagent}': {exc}",
-            tool_call_id=request.tool_call["id"],
-        )
+
+    while True:
+        try:
+            result = handler(request)
+        except Exception as exc:
+            subagent = request.tool_call["args"].get("subagent_type", "?")
+            is_retryable = any(s in str(exc) for s in _RETRYABLE_ERRORS)
+            print(f"\n✗ {subagent}: failed\n  {exc}")
+            human_decision = interrupt({
+                "subagent": subagent,
+                "error_preview": str(exc)[:500],
+                "message": (
+                    f"'{subagent}' lost its connection. Retry?"
+                    if is_retryable
+                    else f"'{subagent}' raised an exception. Continue pipeline?"
+                ),
+            })
+            if human_decision.get("continue") and is_retryable:
+                continue
+            return ToolMessage(
+                content=f"Pipeline aborted after exception in '{subagent}': {exc}",
+                tool_call_id=request.tool_call["id"],
+            )
+        else:
+            break
 
     content = _extract_task_content(result)
     if _task_result_is_error(content):
@@ -131,7 +148,6 @@ def task_error_guard(request, handler):
             "message": f"'{subagent}' returned a suspicious result. Continue pipeline?",
         })
         if not human_decision.get("continue", True):
-            from langchain_core.messages import ToolMessage
             return ToolMessage(
                 content=f"Pipeline aborted by human after '{subagent}' error.",
                 tool_call_id=request.tool_call["id"],
@@ -146,7 +162,7 @@ _run_dir.mkdir(parents=True, exist_ok=True)
 
 agent = create_deep_agent(
     model=model,
-    middleware=[log_before_model, log_after_model],
+    middleware=[log_before_model, log_after_model, task_error_guard],
     subagents=[policy_agent, benchmark_agent, config_agent, interdependency_agent, search_agent],
     checkpointer=checkpointer,
     system_prompt = """
@@ -255,7 +271,12 @@ def start_agent():
     }
 
     _run_start = time.time()
-    final_state = stream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+    while True:
+        try:
+            final_state = stream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+            break
+        except GraphInterrupt as gi:
+            pending = handle_interrupt(gi.args[0])  # returns Command(resume=...) to resume from checkpoint
     _run_elapsed = time.time() - _run_start
 
     for vpath, entry in (final_state.get("files") or {}).items():
@@ -276,10 +297,13 @@ if __name__ == "__main__":
         "files": {"security_policy.txt": _file_data(os.path.join(os.path.dirname(__file__), "security_policy.txt"))},
     }
 
-    #result = stream_agent_v2(agent, pending, config=run_config, on_interrupt=handle_interrupt)
-
     _run_start = time.time()
-    final_state = stream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+    while True:
+        try:
+            final_state = stream_activity(agent, agent_input=pending, config=run_config, render=False, on_event=renderer)
+            break
+        except GraphInterrupt as gi:
+            pending = handle_interrupt(gi.args[0])
     _run_elapsed = time.time() - _run_start
 
     for vpath, entry in (final_state.get("files") or {}).items():
