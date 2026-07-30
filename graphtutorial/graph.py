@@ -47,7 +47,7 @@ class Graph:
     # </GetUserSnippet>
 
     def get_policy_with_settings(self, token, policy_id):
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         url = f"https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/{policy_id}/settings"
         
         settings = []
@@ -59,9 +59,50 @@ class Graph:
             url = data.get("@odata.nextLink")
     
         return settings
+    
+    def get_policy_with_assignments(self, token, policy_id):
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        url = f"https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/{policy_id}/assignments"
+        
+        assignments = []
+        while url:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            assignments.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+    
+        return assignments
 
     # <MakeGraphCallSnippet>
     async def make_graph_call(self):
+        token = await self.get_user_token()
+        url = "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?$expand=settings,assignments"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+        all_policies = []
+        while url:
+            response = requests.get(url, headers=headers, timeout=60)
+            response.raise_for_status()
+            data = response.json()
+            all_policies.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+        
+
+        print(all_policies)
+        
+        """all_policies_with_settings_assigns = []
+
+        for policy in all_policies:
+            settings = self.get_policy_with_settings(token, policy.get("id"))
+            assignments = self.get_policy_with_assignments(token, policy.get("id"))
+            policy["settings"] = settings
+            policy["assignments"] = assignments
+            all_policies_with_settings_assigns.append(policy)
+
+ """
+        
+    async def fetch_all_configuration_settings(self):
         token = await self.get_user_token()
         url = "https://graph.microsoft.com/beta/deviceManagement/configurationSettings"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -74,16 +115,10 @@ class Graph:
             all_policies.extend(data.get("value", []))
             url = data.get("@odata.nextLink")
         
-        """ all_policies_with_settings = []
 
-        for policy in all_policies:
-            settings = self.get_policy_with_settings(token, policy.get("id"))
-            policy["settings"] = settings
-            all_policies_with_settings.append(policy)
- """
-
+        print(all_policies[:20])
         # Write all_policies to a new file
-        with open('policies_and_settings_expand.json', 'w') as f:
+        with open('microsoft_settings.json', 'w') as f:
            json.dump(all_policies, f, indent=4)
 
         return all_policies

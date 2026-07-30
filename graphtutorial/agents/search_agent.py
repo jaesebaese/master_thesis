@@ -7,15 +7,12 @@ import os
 import json
 from agent_utils import safe_json_loads
 
-
-
-OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
-
 load_dotenv()
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
-# Initialize the model
-model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature=0.0)
+MODEL = "openai:gpt-5.4-nano-2026-03-17"
+
+model = init_chat_model(model=MODEL)
 
 # Tavily search (requires TAVILY_API_KEY)
 client = TavilyClient(api_key=TAVILY_API_KEY)
@@ -70,8 +67,6 @@ def tavily_search_specific_configurations(runtime: ToolRuntime) -> str:
         for r in results
         if r.get("cis_status") == "no_benchmark_reference" and r.get("setting_definition_id")
     ]
-
-    print(f"Settings with no CIS benchmark reference: {not_in_benchmark}")
 
     catalog = _load_catalog()
     search_results = []
@@ -137,39 +132,7 @@ search_agent = {
 
 s_agent = create_deep_agent(
     model=model,
-    system_prompt=(
-        "You are a Microsoft Intune documentation specialist. "
-        "Your task is to find Microsoft's own recommendations for Intune settings "
-        "that are not covered by the CIS benchmark.\n\n"
-
-        "## Workflow\n"
-        "1. Call tavily_search_specific_configurations to retrieve all settings that "
-        "have no CIS benchmark reference and their Microsoft documentation search results."
-        "Simply call the tool without any file data, it will be called in the tool anyways\n"
-        "2. Use write_file tool to save these results in a file called search_agent_results.json "
-        "for the supervisor_agent to read and use in its analysis.\n"
-        "3. For each setting in the result of the tavily_search_specific_configurations tool,"
-        "extract the relevant recommendation from the search results.\n"
-        "4. If a setting returned no documentation results, mark it explicitly as "
-        "'No Microsoft documentation found'.\n\n"
-
-        "## Output format\n"
-        "Return a structured list. For each setting:\n"
-        "- **Setting ID**: the raw setting definition ID\n"
-        "- **Description**: a one or two sentence summary of Microsoft's recommendation for this setting, based on the search results.\n"
-        "- **Microsoft Recommendation**: one or two sentences summarising what "
-        "Microsoft recommends for this setting, in plain language.\n"
-        "- **Recommended Value**: the specific value or range Microsoft recommends, "
-        "if stated in the documentation.\n"
-        "- **Source**: the URL from learn.microsoft.com\n\n"
-
-        "## Rules\n"
-        "- Only report what the search results say. Do not invent recommendations.\n"
-        "- If no documentation was found for a setting, state: "
-        "- **Note**:'No Microsoft documentation found — human review required.'\n"
-        "- Do not include Description, Recommendation or Recommended Value for settings with no documentation."
-        "- Do not include settings that are already covered by the CIS benchmark."
-    ),
+    system_prompt=search_agent["system_prompt"],
     tools=[tavily_search_specific_configurations],
 )
 
@@ -182,6 +145,7 @@ def _file_data(path: str) -> dict:
     return {"content": lines, "created_at": now, "modified_at": now}
 
 """if __name__ == "__main__":
+    # This part is only used for testing the agent in isolation, not when running the full pipeline
     # result = tavily_search.invoke("Bitlocker policies for Windows devices")
     logger = logging.getLogger(__name__)
     renderer = RichRenderer(logger=logger)

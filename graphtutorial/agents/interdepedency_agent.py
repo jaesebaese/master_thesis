@@ -12,44 +12,9 @@ import logging
 
 load_dotenv()
 
-OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
-OLLAMA_MODEL = "mistral-nemo:latest"
-#model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
+MODEL = "openai:gpt-5.4-nano-2026-03-17"
 
-
-# Initialize the model
-model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature=0.0)
-
-CLASSIFY_SYSTEM = """\
-You are an Intune security policy interdependency analyst.
-
-You will receive:
-1. A "focal" setting currently configured in the tenant.
-2. A list of "candidates" — semantically similar settings, each flagged with whether it is configured in the tenant.
-
-For each candidate classify its relationship to the focal setting using exactly one label:
-- parent_child   – one gates or depends on the other in the Intune settings tree
-- conflict       – configured to contradictory or mutually exclusive values
-- alternative    – achieves the same control via a different mechanism
-- prerequisite   – one must be configured before the other takes effect
-- paired_control – neither alone achieves the control; both are needed together
-- unrelated      – no meaningful security dependency (omit from output)
-
-Return a JSON array. Each element must have:
-{
-  "candidate_id": "...",
-  "candidate_name": "...",
-  "relationship": "<label>",
-  "tenant_configured": true|false,
-  "severity": "finding" or "informational",
-  "explanation": "<one concise sentence>"
-}
-
-Use severity="finding" for conflict and prerequisite relationships.
-Use severity="informational" for parent_child, alternative, and paired_control.
-If no meaningful relationships exist, return [].
-Output must be valid JSON parseable by json.loads().
-"""
+model = init_chat_model(model=MODEL)
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -352,6 +317,7 @@ def _file_data(path: str) -> dict:
 
 
 if __name__ == "__main__":
+    # This part is only used for testing the agent in isolation, not when running the full pipeline
     logger = logging.getLogger(__name__)
     renderer = RichRenderer(logger=logger)
 

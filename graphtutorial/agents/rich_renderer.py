@@ -390,18 +390,6 @@ def _fmt_args(v) -> str:
     return str(v)
 
 
-def fan_out(*callbacks):
-    """Combine several on_event callbacks into one.
-
-    Example:
-        on_event = fan_out(RichRenderer(logger=logger), my_json_logger)
-    """
-    def _dispatch(ev: ActivityEvent) -> None:
-        for cb in callbacks:
-            cb(ev)
-    return _dispatch
-
-
 if __name__ == "__main__":
     # Exercise the renderer with the same fake agent used in activity_stream.
     from activity_stream import stream_activity

@@ -8,21 +8,9 @@ from agent_utils import safe_json_loads
 
 load_dotenv()
 
-OLLAMA_MODEL = "minimax-m2.5:cloud"
+MODEL = "openai:gpt-5.4-nano-2026-03-17"
 
-OPENAI_API_MODEL = "gpt-5.4-nano-2026-03-17"
-
-# Initialize the model -> if not used it will be inherited by the supervisor_agent
-#model = init_chat_model(model=OLLAMA_MODEL, model_provider="ollama", temperature=0.0)
-model = init_chat_model(model=OPENAI_API_MODEL, model_provider="openai", temperature=0.0)
-""" model = init_chat_model(
-    model=OLLAMA_MODEL,
-    model_provider="ollama",
-    base_url="https://ollama.com",
-    client_kwargs={"headers": {"Authorization": f"Bearer {os.getenv('OLLAMA_API_KEY')}"}},
-    temperature=0.0,
-)
- """
+model = init_chat_model(model=MODEL)
 
 
 @tool
@@ -169,28 +157,6 @@ Toggle setting —
     return json.dumps(parsed, indent=2)
 
 
-@tool
-def check_security_policy(runtime: ToolRuntime) -> str:
-    """
-    Check if the given security policy fulfils the format requirements.
-
-    This tool receives the security policy text.
-
-    The tool returns a JSON object containing only the settings from the input array that are relevant to the policy.
-    No new settings should be invented, and unrelated settings should be excluded. All fields from the input must be preserved verbatim.
-    """
-    files = runtime.state.get("files", {})
-        
-    file_entry = files.get("/security_policy.txt") or files.get("security_policy.txt")
-
-    if file_entry is None:
-        return json.dumps({"error": "policy_requirements.json not found. Ensure policy_agent has run first."})
-    if isinstance(file_entry, dict):
-        raw = file_entry.get("content", [])
-        policy_file = "\n\n".join(raw) if isinstance(raw, list) else str(raw)
-    else:
-        policy_file = str(file_entry)
-
 policy_agent = {
     "name": "policy_agent",
     "description": (
@@ -231,6 +197,7 @@ unless requirements could not be extracted.
 
 
 if __name__ == "__main__":
+    # This part is only used for testing the agent in isolation, not when running the full pipeline
     build_tenant_collection(force_rebuild=False)
     policy = "All USB storage devices must be blocked on organizational endpoints to prevent unauthorized data transfer and mitigate the risk of malware infections. This policy applies to all employees, contractors, and third-party users who access organizational systems and data. The use of USB storage devices is prohibited unless explicitly authorized by the IT department for specific business needs. Exceptions may be granted on a case-by-case basis, but only after a thorough risk assessment and implementation of appropriate security controls. Users must not attempt to bypass this policy by using alternative methods of data transfer, such as personal email accounts or cloud storage services, without prior approval. Violations of this policy may result in disciplinary action, up to and including termination of employment or contract. The organization will implement technical controls to enforce this policy, such as endpoint security solutions that block USB storage device access and monitor for any attempts to connect unauthorized devices."
     

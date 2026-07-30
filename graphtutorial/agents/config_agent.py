@@ -10,104 +10,10 @@ from rich_renderer import RichRenderer
 from preprocessing_at_startup import build_tenant_collection, flatten_for_relevance, TENANT_SETTINGS_JSON, INTUNE_SETTINGS_JSON
 from activity_stream import stream_activity
 
-OPENAI_MODEL = "gpt-5.4-nano-2026-03-17"
-
-
 # Initialize the model
-model = init_chat_model(model=OPENAI_MODEL, model_provider="openai", temperature=0.0)
+MODEL = "openai:gpt-5.4-nano-2026-03-17"
 
-
-@tool
-def find_configs_in_policies(runtime: ToolRuntime) -> str:
-    """Check which configured settings appear in policies_and_settings_expand.json.
-
-    When configs is omitted, reads policy_results.json from the virtual
-    filesystem (written by policy_agent) or from disk as a fallback.
-    When configs is provided explicitly, uses that list directly.
-
-    Each item must have at least an "id" field matching a settingDefinitionId
-    in the policy settings tree.
-
-    Returns:
-      {
-        "found":   [{config, policy_name, policy_id}, ...],
-        "missing": [config, ...]
-      }
-    """
-    if not configs:
-        files = runtime.state.get("files", {})
-        file_entry = files.get("/policy_results.json") or files.get("policy_results.json")
-        if file_entry is not None:
-            if isinstance(file_entry, dict):
-                raw = file_entry.get("content", [])
-                content_str = "\n".join(raw) if isinstance(raw, list) else str(raw)
-            else:
-                content_str = str(file_entry)
-            data = safe_json_loads(content_str)
-        else:
-            disk_path = os.path.join(os.path.dirname(__file__), "policy_results.json")
-            try:
-                with open(disk_path) as f:
-                    data = json.load(f)
-            except FileNotFoundError:
-                return json.dumps({"error": "policy_results.json not found. Run policy_agent first."})
-
-        settings = data.get("settings", data) if isinstance(data, dict) else data
-        configs = settings
-
-    path = os.path.join(
-        os.path.dirname(__file__), "../configurations/policies_and_settings_expand.json"
-    )
-    with open(path) as f:
-        policies = json.load(f)
-
-    def _collect_ids(instance: dict, out: set) -> None:
-        sid = instance.get("settingDefinitionId")
-        if sid:
-            out.add(sid)
-        for val in instance.values():
-            if isinstance(val, dict):
-                _collect_ids(val, out)
-            elif isinstance(val, list):
-                for item in val:
-                    if isinstance(item, dict):
-                        _collect_ids(item, out)
-
-    # Build map: settingDefinitionId → list of {policy_name, policy_id}
-    id_to_policies: dict[str, list[dict]] = {}
-    for policy in policies:
-        policy_info = {"policy_name": policy.get("name", ""), "policy_id": policy.get("id", "")}
-        setting_ids: set[str] = set()
-        for setting in policy.get("settings", []):
-            _collect_ids(setting.get("settingInstance", {}), setting_ids)
-        for sid in setting_ids:
-            id_to_policies.setdefault(sid, []).append(policy_info)
-
-    found = []
-    missing = []
-    for config in configs:
-        if hasattr(config, "id"):
-            config_id = config.id
-            config_dict = config.model_dump() if hasattr(config, "model_dump") else vars(config)
-        elif isinstance(config, dict):
-            config_id = config.get("id", "")
-            config_dict = config
-        else:
-            # LLM passed a raw string (the setting definition ID itself)
-            config_id = str(config)
-            config_dict = {"id": config_id}
-        matches = id_to_policies.get(config_id)
-        if matches:
-            for m in matches:
-                found.append({**m, "config": config_dict})
-        else:
-            missing.append(config_dict)
-
-    result = {"found": found, "missing": missing}
-    relevant_configs_path = os.path.join(os.path.dirname(__file__), "relevant_configs.json")
-    with open(relevant_configs_path, "w") as f:
-        json.dump(result, f, indent=2)
-    return json.dumps(result, indent=2)
+model = init_chat_model(model=MODEL)
 
 
 @tool
@@ -176,7 +82,7 @@ def find_configs_in_tenant(runtime: ToolRuntime) -> str:
             matches.append({
                 "setting_id": cid,
                 "setting_name": meta.get("name", cid),
-                "configured_value_label": meta.get("configured_value_label", ""),
+                "configured_value_label": tenant_hits[0].get("configured_value_label", meta.get("configured_value_label", "")) if tenant_hits else meta.get("configured_value_label", ""),
                 "configured_value": tenant_hits[0].get("configured_value") if tenant_hits else None,
                 "description": meta.get("description", ""),
                 "policy_name": meta.get("policy_name", ""),
@@ -420,6 +326,7 @@ config_agent = {
 co_agent = create_deep_agent(system_prompt=config_agent["system_prompt"], tools=config_agent["tools"], model=config_agent["model"])
 
 if __name__ == "__main__":
+    # This part is only used for testing the agent in isolation, not when running the full pipeline
     logger = logging.getLogger(__name__)
     renderer = RichRenderer(logger=logger)
 
